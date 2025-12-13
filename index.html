@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="description"
+        content="When Gaussian Meets Surfel: Ultra-fast High-fidelity Radiance Field Rendering">
+  <meta name="keywords" content="Novel view synthesis, radiance field, Gaussian splatting, point-based rendering, real-time rendering">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GES</title>
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-PYVRSFMDRL"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+
+    function gtag() {
+      dataLayer.push(arguments);
+    }
+
+    gtag('js', new Date());
+
+    gtag('config', 'G-PYVRSFMDRL');
+  </script>
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
+        rel="stylesheet">
+
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <!-- <link rel="icon" href="./static/images/favicon.svg"> -->
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <script src="./static/js/index.js"></script>
+</head>
+<body>
+
+<nav class="navbar" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </a>
+  </div>
+</nav>
+
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title" style="font-weight: 600;">When Gaussian Meets Surfel: <br>Ultra-fast High-fidelity Radiance Field Rendering</h1>
+          <h1 style="font-size:1.5rem; color:#6e6e6e; font-weight: 550;"> ACM SIGGRAPH 2025<br></h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">
+              <a href="https://scholar.google.com/citations?hl=en&user=A5PveoUAAAAJ">Keyang Ye</a>
+            </span> &nbsp;&nbsp;&nbsp;
+            <span class="author-block">
+              Tianjia Shao</span> &nbsp;&nbsp;&nbsp;
+            <span class="author-block">
+              <a href="http://www.kunzhou.net/">Kun Zhou</a>
+            </span>
+          </div>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">State Key Lab of CAD & CG, Zhejiang University</span>
+          </div>
+
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <!-- PDF Link. -->
+              <span class="link-block">
+                <a href="static\pdf\GES.pdf"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>Paper</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://arxiv.org/abs/2504.17545"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                  </span>
+                  <span>arXiv</span>
+                </a>
+              </span>
+              <!-- Video Link. -->
+              <span class="link-block">
+                <a href="https://youtu.be/DlzzQ1YYsHE"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-youtube"></i>
+                  </span>
+                  <span>Video</span>
+                </a>
+              </span>
+              <!-- Code Link. -->
+              <span class="link-block">
+                <a href="https://github.com/YessionCC/GES"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fab fa-github"></i>
+                  </span>
+                  <span>Code</span>
+                  </a>
+              </span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<section class="hero is-light is-small">
+  <div class="hero-body">
+    <div class="container">
+      <div id="results-carousel" class="carousel results-carousel">
+        <div class="item item-garden">
+          <video poster="" id="garden" autoplay controls muted loop playsinline height="100%">
+            <source src="./static/videos/garden.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="item item-stump">
+          <video poster="" id="stump" autoplay controls muted loop playsinline height="100%">
+            <source src="./static/videos/stump.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="item item-bicycle">
+          <video poster="" id="bicycle" autoplay controls muted loop playsinline height="100%">
+            <source src="./static/videos/bicycle.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+        <div class="item item-treehill">
+          <video poster="" id="treehill" autoplay controls muted loop playsinline height="100%">
+            <source src="./static/videos/treehill.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+
+    </div>
+  </div>
+</section>
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>
+            We introduce Gaussian-enhanced Surfels (GESs), a bi-scale representation for radiance field rendering, 
+            wherein a set of 2D opaque surfels with view-dependent colors represent the coarse-scale geometry and appearance of scenes, 
+            and a few 3D Gaussians surrounding the surfels supplement fine-scale appearance details. 
+            The rendering with GESs consists of two passes -- 
+            surfels are first rasterized through a standard graphics pipeline to produce depth and color maps, 
+            and then Gaussians are splatted with depth testing and color accumulation on each pixel order independently. 
+            The optimization of GESs from multi-view images is performed through an elaborate coarse-to-fine procedure, 
+            faithfully capturing rich scene appearance. 
+            The entirely sorting-free rendering of GESs not only achieves very fast rates, 
+            but also produces view-consistent images, successfully avoiding popping artifacts under view changes. 
+            The basic GES representation can be easily extended to achieve anti-aliasing in rendering (Mip-GES), 
+            boosted rendering speeds (Speedy-GES) and compact storage (Compact-GES), 
+            and reconstruct better scene geometries by replacing 3D Gaussians with 2D Gaussians (2D-GES). 
+            Experimental results show that GESs advance the state-of-the-arts as a compelling representation for ultra-fast high-fidelity radiance field rendering.
+          </p>
+        </div>
+      </div>
+    </div>
+    <!--/ Abstract. -->
+
+    <!-- Paper video. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Video</h2>
+        <div class="publication-video">
+          <iframe width="1210" height="681" src="https://www.youtube.com/embed/DlzzQ1YYsHE" title="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+        </div>
+      </div>
+    </div>
+    <!--/ Paper video. -->
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">Pipeline</h2>
+
+        <!-- Prop. -->
+        <div class="content has-text-justified">
+          <p>
+            The rendering of GES radiance fields consists of two passes, and is entirely sorting-free. 
+            Firstly, the opaque surfels are rasterized through a standard graphics pipeline, 
+            producing the color and depth maps. Secondly, we splat the Gaussians to the screen with depth testing, 
+            and accumulate the Gaussian color weighted by opacity on each pixel of the surfel color map, 
+            in an order-independent way. For each pixel, the Gaussians whose center depths fail to pass the depth testing with the surfel depth map will not accumulate color on the pixel, 
+            which means Gaussians are occluded by the geometry represented by the surfels. Such a sorting-free rendering not only bypasses the computation bottleneck of Gaussian sorting and achieves very fast frame rates, 
+            but also successfully avoids popping artifacts under view changes
+          </p>
+        </div>
+
+        <div class="content has-text-centered">
+          <img src="./static/images/pipeline.png" class="center">
+        </div>
+
+        <div class="columns is-centered" style="position: relative;">
+          <div class="item item-garden1">
+            <video poster="" id="garden1" autoplay controls muted loop playsinline height="100%">
+              <source src="./static/videos/pass/surfel.mp4"
+                      type="video/mp4">
+            </video>
+            <div class="bal-beforePosition beforeLabel" style="z-index:1;">
+              Pass 1: Fully Opaque Surfel Rendering
+            </div>
+          </div>
+          <div class="item item-garden1">
+            <video poster="" id="garden1" autoplay controls muted loop playsinline height="100%">
+              <source src="./static/videos/pass/3dbase.mp4"
+                      type="video/mp4">
+            </video>
+            <div class="bal-afterPosition afterLabel" style="z-index:1;">
+              Pass 2: Gaussians as fine details
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+</section>
+
+<section class="section">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3">Visual Comparisons</h2>
+      <div class="content has-text-justified">
+        <p>
+  
+        </p>
+      </div>
+      <div class="columns is-centered">
+        <!-- Visual Effects. -->
+        <div class="column">
+          <div class="content">
+            <div class="columns is-centered">
+              <div class="column is-full-width">
+                <div id="example1" class="bal-container-small">
+        
+                  <div class="bal-after">
+                    <img src="./static/images/stump_our.png">
+                    <div class="bal-afterPosition afterLabel" style="z-index:1;">
+                      Ours: 3D-GES
+                    </div>
+                  </div>
+                
+                  <div class="bal-before" style="width:50%;">
+                    <div class="bal-before-inset" style="width: 628px;">
+                    <img src="./static/images/stump_3dgs.png">
+                      <div class="bal-beforePosition beforeLabel">
+                        3DGS [Kerbl et al. 2023]
+                      </div>
+                    </div>
+                  </div>
+                
+                  <div class="bal-handle" style="left:50%;">
+                    <span class=" handle-left-arrow"></span>
+                    <span class="handle-right-arrow"></span>
+                  </div>
+                
+                </div>
+  
+  
+                <div id="example2" class="bal-container-small">
+        
+                  <div class="bal-after">
+                    <img src="./static/images/bicycle_our.png">
+                    <div class="bal-afterPosition afterLabel" style="z-index:1;">
+                      Ours: 3D-GES
+                    </div>
+                  </div>
+                
+                  <div class="bal-before" style="width:50%;">
+                    <div class="bal-before-inset" style="width: 628px;">
+                    <img src="./static/images/bicycle_speedy.png">
+                      <div class="bal-beforePosition beforeLabel">
+                        SpeedySplat [Hanson et al. 2024]
+                      </div>
+                    </div>
+                  </div>
+                
+                  <div class="bal-handle" style="left:50%;">
+                    <span class=" handle-left-arrow"></span>
+                    <span class="handle-right-arrow"></span>
+                  </div>
+                
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">Popping Artifacts Comparisons</h2>
+    <div class="content has-text-justified">
+      <p>
+
+      </p>
+    </div>
+    <div class="columns is-centered" style="position: relative;">
+      <div class="item item-garden1">
+        <video poster="" id="garden1" autoplay controls muted loop playsinline height="100%">
+          <source src="./static/videos/pop/garden/3dgs.mp4"
+                  type="video/mp4">
+        </video>
+        <div class="bal-beforePosition beforeLabel" style="z-index:1;">
+          3DGS [Kerbl et al. 2023]
+        </div>
+      </div>
+      <div class="item item-garden1">
+        <video poster="" id="garden1" autoplay controls muted loop playsinline height="100%">
+          <source src="./static/videos/pop/garden/our2D.mp4"
+                  type="video/mp4">
+        </video>
+        <div class="bal-afterPosition afterLabel" style="z-index:1;">
+          Ours: 3D-GES
+        </div>
+      </div>
+    </div>
+
+    <div class="columns is-centered" style="position: relative;">
+      <div class="item item-garden2">
+        <video poster="" id="garden2" autoplay controls muted loop playsinline height="100%">
+          <source src="./static/videos/pop/garden/3dgs.mp4"
+                  type="video/mp4">
+        </video>
+        <div class="bal-beforePosition beforeLabel" style="z-index:1;">
+          StopThePop [Radl et al. 2024]
+        </div>
+      </div>
+      <div class="item item-garden2">
+        <video poster="" id="garden2" autoplay controls muted loop playsinline height="100%">
+          <source src="./static/videos/pop/garden/our2D.mp4"
+                  type="video/mp4">
+        </video>
+        <div class="bal-afterPosition afterLabel" style="z-index:1;">
+          Ours: 2D-GES
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">Extensions</h2>
+
+        <!-- Prop. -->
+        <div class="content has-text-justified">
+          <p>
+            The basic GES representation can be easily extended to further enhance its capability by incorporating recent improvements of the vanilla 3DGS method. 
+            By combining the filtering algorithm for Gaussian splatting [Yu et al. 2024] with the standard multi sampling
+            anti-aliasing (MSAA) for surfel rasterization, we are able to significantly reduce aliasing artifacts in renderred images (Mip-GES).  
+            The Hessian pruning score [Hanson et al. 2024] can be employed to largely reduce the number of Gaussians, further boosting our rendering speed (Speedy-GES). 
+            Following [Lee et al. 2024], we can replace the SH coefficients of both surfels and Gaussians by querying colors from a hash grid, and quantize the scaling and rotation of surfels and Gaussians, obtaining a compact storage of GES (Compact-GES). 
+            We can also replace the 3D Gaussians with 2D Gaussians [Huang et al. 2024] to reconstruct better scene geometries (2D-GES).
+          </p>
+        </div>
+
+        <div class="content has-text-centered">
+          <img src="./static/images/extensions.png" class="center">
+        </div>
+
+        <div class="content has-text-justified" style="font-size: smaller;">
+          <p>
+            *The quantitative results of rendering quality, speed and storage are evaluated on Mip-NeRF360 dataset [Barron et al. 2022] and the quantitative results of mesh reconstruction are evaluated on DTU dataset [Jensen et al. 2014].
+          </p>
+        </div>
+
+      </div>
+    </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">References</h2>
+
+        <!-- Prop. -->
+        <div class="content has-text-justified">
+          <p>
+            [Kerbl et al. 2023] Bernhard Kerbl, Georgios Kopanas, Thomas Leimkühler, and George Drettakis. 2023.
+            3D Gaussian Splatting for Real-Time Radiance Field Rendering. ACM Transactions
+            on Graphics (SIGGRAPH Conference Proceedings) 42, 4 (July 2023).
+          </p>
+          <p>
+            [Hanson et al. 2024] Alex Hanson, Allen Tu, Geng Lin, Vasu Singla, Matthias Zwicker, and Tom Goldstein.
+            2024. Speedy-Splat: Fast 3D Gaussian Splatting with Sparse Pixels and Sparse
+            Primitives. arXiv preprint arXiv:2412.00578 (2024).
+          </p>
+          <p>
+            [Radl et al. 2024] Lukas Radl, Michael Steiner, Mathias Parger, Alexander Weinrauch, Bernhard Kerbl,
+            and Markus Steinberger. 2024. StopThePop: Sorted Gaussian Splatting for View
+            Consistent Real-time Rendering. ACM Trans. Graph. 43, 4, Article 64 (July 2024), 17 pages.
+          </p>
+          <p>
+            [Yu et al. 2024] Zehao Yu, Anpei Chen, Binbin Huang, Torsten Sattler, and Andreas Geiger. 2024a.
+            Mip-Splatting: Alias-Free 3D Gaussian Splatting. In 2024 IEEE/CVF Conference on
+            Computer Vision and Pattern Recognition (CVPR). 19447-19456.
+          </p>
+          <p>
+            [Lee et al. 2024] Joo Chan Lee, Daniel Rho, Xiangyu Sun, Jong Hwan Ko, and Eunbyung Park. 2024.
+            Compact3dgaussianrepresentationforradiance field. In Proceedings of the IEEE/CVF
+            Conference on Computer Vision and Pattern Recognition. 21719-21728.
+          </p>
+          <p>
+            [Huang et al. 2024] Binbin Huang, Zehao Yu, Anpei Chen, Andreas Geiger, and Shenghua Gao. 2024. 2D
+            Gaussian Splatting for Geometrically Accurate Radiance Fields. In ACM SIGGRAPH
+            2024 Conference Papers (Denver, CO, USA) (SIGGRAPH '24). Article 32, 11 pages.
+          </p>
+          <p>
+            [Barron et al. 2022] Jonathan T. Barron, Ben Mildenhall, Matthew Tancik, Peter Hedman, Ricardo Martin
+            Brualla, and Pratul P. Srinivasan. 2021. Mip-NeRF: A Multiscale Representation for
+            Anti-Aliasing Neural Radiance Fields. In 2021 IEEE/CVF International Conference on
+            Computer Vision (ICCV). 5835-5844.
+          </p>
+          <p>
+            [Jensen et al. 2014] Rasmus Jensen, Anders Dahl, George Vogiatzis, Engin Tola, and Henrik Aanæs. 2014.
+            Large scale multi-view stereopsis evaluation. In Proceedings of the IEEE conference
+            on computer vision and pattern recognition. 406-413.
+          </p>
+        </div>
+
+      </div>
+    </div>
+</section>
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>@article{ye2025gaussian,
+  title={When gaussian meets surfel: Ultra-fast high-fidelity radiance field rendering},
+  author={Ye, Keyang and Shao, Tianjia and Zhou, Kun},
+  journal={ACM Transactions on Graphics (TOG)},
+  volume={44},
+  number={4},
+  pages={1--15},
+  year={2025},
+  publisher={ACM New York, NY, USA}
+}</code></pre>
+  </div>
+</section>
+
+
+<footer class="footer">
+  <div class="container">
+    <div class="content has-text-centered">
+      <a class="icon-link"
+         href="static\pdf\GES.pdf">
+        <i class="fas fa-file-pdf"></i>
+      </a>
+      <a class="icon-link" href="https://github.com/YessionCC/GES" class="external-link" disabled>
+        <i class="fab fa-github"></i>
+      </a>
+    </div>
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <p>
+            We thank the authors of <a href="https://nerfies.github.io/">Nerfies</a> that kindly open sourced the template of this website.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="static/js/script.js"></script>
+
+<script>
+    new BeforeAfter({
+        id: '#example1'
+    });
+    new BeforeAfter({
+        id: '#example2'
+    });
+    new BeforeAfter({
+        id: '#example3'
+    });
+    new BeforeAfter({
+        id: '#example4'
+    });
+
+</script>
+
+</body>
+</html>
