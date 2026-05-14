@@ -708,6 +708,10 @@ async function loadPly(buffer) {
         const s1 = Math.exp(dataView.getFloat32(base + props['scale_1'], true));
         const s2 = isSurfel ? 0 : Math.exp(dataView.getFloat32(base + (props['scale_2']), true)); 
 
+        //const s0 = Math.max(0., dataView.getFloat32(base + props['scale_0'], true));
+        //const s1 = Math.max(0., dataView.getFloat32(base + props['scale_1'], true));
+        //const s2 = isSurfel ? 0 : dataView.getFloat32(base + (props['scale_2']), true); 
+
         let r0 = dataView.getFloat32(base + (props['rot_0']), true);
         let r1 = dataView.getFloat32(base + (props['rot_1']), true);
         let r2 = dataView.getFloat32(base + (props['rot_2']), true);
@@ -743,7 +747,8 @@ async function loadPly(buffer) {
             surfelNum++;
         } 
         else {
-            const opVal = rawOp;
+            //const opVal = rawOp;
+            const opVal = Math.log(1+(Math.log(1+Math.exp(rawOp))));
             const m00 = R[0]*s0, m01 = R[1]*s1, m02 = R[2]*s2;
             const m10 = R[3]*s0, m11 = R[4]*s1, m12 = R[5]*s2;
             const m20 = R[6]*s0, m21 = R[7]*s1, m22 = R[8]*s2;
@@ -770,9 +775,9 @@ async function loadPly(buffer) {
         const cx = sumX / surfelNum;
         const cy = sumY / surfelNum;
         const cz = sumZ / surfelNum;
-        camera.target = [cx, cy, cz];
-        camera.radius = 5.0; 
-        camera.quat = Quat.identity();
+        //camera.target = [cx, cy, cz];
+        //camera.radius = 5.0; 
+        //camera.quat = Quat.identity();
     }
 
     return {

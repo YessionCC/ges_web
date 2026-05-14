@@ -1,0 +1,108 @@
+:root {
+  color-scheme: dark;
+  --panel: rgba(12, 15, 18, 0.82);
+  --text: #eef2ef;
+  --muted: #aab3ad;
+  --accent: #d7b66a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-family: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  background:
+    radial-gradient(circle at 16% 18%, rgba(215, 182, 106, 0.16), transparent 30%),
+    radial-gradient(circle at 84% 72%, rgba(81, 122, 116, 0.18), transparent 34%),
+    #07090a;
+  color: var(--text);
+}
+
+#canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#panel {
+  position: fixed;
+  left: 18px;
+  top: 18px;
+  z-index: 10;
+  width: min(340px, calc(100vw - 36px));
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.38);
+}
+
+h1 {
+  margin: 0 0 14px;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file input {
+  display: none;
+}
+
+.file span,
+select,
+input[type="range"] {
+  width: 100%;
+}
+
+.file span,
+select {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  padding: 10px 12px;
+}
+
+input[type="range"] {
+  accent-color: var(--accent);
+}
+
+.file span {
+  display: block;
+  cursor: pointer;
+  color: #15130d;
+  background: linear-gradient(135deg, #f1d591, var(--accent));
+  font-weight: 700;
+}
+
+#status {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+code {
+  color: #f4d98f;
+}

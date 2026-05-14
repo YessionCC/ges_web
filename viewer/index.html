@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Guobo Product Viewer</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <section id="panel">
+        <h1>Guobo Product Viewer</h1>
+        <label class="file">
+          <input id="fileInput" type="file" accept=".bin,.glb,application/octet-stream,model/gltf-binary" />
+          <span>Open result.bin / result_compress.glb</span>
+        </label>
+        <label>
+          Material
+          <select id="modeSelect">
+            <option value="0" selected>PBR preview</option>
+            <option value="1">pd</option>
+            <option value="2">ps</option>
+            <option value="3">ax</option>
+            <option value="4">ay</option>
+            <option value="5">normal</option>
+            <option value="6">tangent</option>
+            <option value="7">uv</option>
+          </select>
+        </label>
+        <label class="row">
+          <input id="flipV" type="checkbox" checked />
+          Flip texture V
+        </label>
+        <label>
+          Light intensity <span id="lightIntensityValue">1.40</span>
+          <input id="lightIntensity" type="range" min="0" max="6" step="0.05" value="1.4" />
+        </label>
+        <label>
+          Headlight spread <span id="headlightRangeValue">0.75</span>
+          <input id="headlightRange" type="range" min="0.05" max="2.5" step="0.01" value="0.75" />
+        </label>
+        <p id="status">Drop a <code>result.bin</code> file anywhere, or choose one above.</p>
+      </section>
+      <canvas id="canvas"></canvas>
+    </main>
+    <script>
+      window.addEventListener("dragover", function (event) {
+        event.preventDefault();
+      });
+      window.addEventListener("drop", function (event) {
+        event.preventDefault();
+      });
+      window.addEventListener("error", function (event) {
+        var status = document.getElementById("status");
+        if (status) status.textContent = "Viewer failed to load: " + event.message;
+      });
+    </script>
+    <script type="module" src="./viewer.js"></script>
+  </body>
+</html>
