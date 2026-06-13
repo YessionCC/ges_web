@@ -1,5 +1,7 @@
 import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
+import { RGBELoader } from "./vendor/RGBELoader.js";
+import { EXRLoader } from "./vendor/EXRLoader.js";
 
 const MAGIC = "GBPRD001";
 const canvas = document.getElementById("canvas");
@@ -7,10 +9,37 @@ const statusEl = document.getElementById("status");
 const fileInput = document.getElementById("fileInput");
 const modeSelect = document.getElementById("modeSelect");
 const flipVInput = document.getElementById("flipV");
+const lightingModeInput = document.getElementById("lightingMode");
 const lightIntensityInput = document.getElementById("lightIntensity");
 const lightIntensityValue = document.getElementById("lightIntensityValue");
 const headlightRangeInput = document.getElementById("headlightRange");
 const headlightRangeValue = document.getElementById("headlightRangeValue");
+const spotDistanceInput = document.getElementById("spotDistance");
+const spotDistanceValue = document.getElementById("spotDistanceValue");
+const spotYawInput = document.getElementById("spotYaw");
+const spotYawValue = document.getElementById("spotYawValue");
+const spotPitchInput = document.getElementById("spotPitch");
+const spotPitchValue = document.getElementById("spotPitchValue");
+const spotConeInput = document.getElementById("spotCone");
+const spotConeValue = document.getElementById("spotConeValue");
+const spotSoftnessInput = document.getElementById("spotSoftness");
+const spotSoftnessValue = document.getElementById("spotSoftnessValue");
+const spotAutoInput = document.getElementById("spotAuto");
+const envMapInput = document.getElementById("envMapInput");
+const envIntensityInput = document.getElementById("envIntensity");
+const envIntensityValue = document.getElementById("envIntensityValue");
+const envRotationYawInput = document.getElementById("envRotationYaw");
+const envRotationYawValue = document.getElementById("envRotationYawValue");
+const envRotationPitchInput = document.getElementById("envRotationPitch");
+const envRotationPitchValue = document.getElementById("envRotationPitchValue");
+const envRotationRollInput = document.getElementById("envRotationRoll");
+const envRotationRollValue = document.getElementById("envRotationRollValue");
+const clearEnvMapButton = document.getElementById("clearEnvMap");
+const lightingSections = document.querySelectorAll("[data-light-section]");
+
+function valueOrDefault(input, fallback) {
+  return input ? Number(input.value) : fallback;
+}
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -24,6 +53,29 @@ camera.position.set(0, 0.35, 2.2);
 let productMesh = null;
 let material = null;
 let sceneRadius = 1.0;
+let environmentTexture = null;
+let environmentSourceTexture = null;
+let environmentPmremTarget = null;
+const rgbeLoader = new RGBELoader();
+const exrLoader = new EXRLoader();
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+const fallbackEnvTexture = new THREE.DataTexture(new Float32Array([0, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
+fallbackEnvTexture.colorSpace = THREE.LinearSRGBColorSpace;
+fallbackEnvTexture.needsUpdate = true;
+
+const spotDirection = new THREE.Vector3();
+const spotPosition = new THREE.Vector3();
+const spotlightState = {
+  distance: valueOrDefault(spotDistanceInput, 2.2),
+  yawDeg: valueOrDefault(spotYawInput, 35),
+  pitchDeg: valueOrDefault(spotPitchInput, 18),
+  coneDeg: valueOrDefault(spotConeInput, 26),
+  softness: valueOrDefault(spotSoftnessInput, 0.24),
+  auto: Boolean(spotAutoInput?.checked),
+  autoBaseYawDeg: valueOrDefault(spotYawInput, 35),
+  autoBasePitchDeg: valueOrDefault(spotPitchInput, 18),
+};
 
 class QuaternionOrbitController {
   constructor(camera, domElement) {
@@ -338,6 +390,211 @@ function prepareProductTexture(texture) {
   return texture;
 }
 
+function configureEnvironmentTexture(texture) {
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.flipY = false;
+  texture.colorSpace = THREE.LinearSRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createTextureFromLoaderData(texData) {
+  const texture = new THREE.DataTexture();
+  if (texData.image !== undefined) {
+    texture.image = texData.image;
+  } else {
+    texture.image.width = texData.width;
+    texture.image.height = texData.height;
+    texture.image.data = texData.data;
+  }
+  texture.wrapS = texData.wrapS !== undefined ? texData.wrapS : THREE.ClampToEdgeWrapping;
+  texture.wrapT = texData.wrapT !== undefined ? texData.wrapT : THREE.ClampToEdgeWrapping;
+  texture.magFilter = texData.magFilter !== undefined ? texData.magFilter : THREE.LinearFilter;
+  texture.minFilter = texData.minFilter !== undefined ? texData.minFilter : THREE.LinearFilter;
+  texture.anisotropy = texData.anisotropy !== undefined ? texData.anisotropy : 1;
+  texture.format = texData.format !== undefined ? texData.format : THREE.RGBAFormat;
+  texture.type = texData.type !== undefined ? texData.type : THREE.UnsignedByteType;
+  if (texData.colorSpace !== undefined) {
+    texture.colorSpace = texData.colorSpace;
+  }
+  if (texData.flipY !== undefined) {
+    texture.flipY = texData.flipY;
+  }
+  if (texData.generateMipmaps !== undefined) {
+    texture.generateMipmaps = texData.generateMipmaps;
+  }
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function disposeEnvironmentTexture() {
+  if (environmentTexture) {
+    environmentTexture.dispose();
+    environmentTexture = null;
+  }
+  if (environmentSourceTexture) {
+    environmentSourceTexture.dispose();
+    environmentSourceTexture = null;
+  }
+  if (environmentPmremTarget) {
+    environmentPmremTarget.dispose();
+    environmentPmremTarget = null;
+  }
+  scene.background = null;
+  scene.backgroundIntensity = 1;
+  scene.backgroundBlurriness = 0;
+  scene.backgroundRotation.set(0, 0, 0);
+}
+
+function getCubeUVParams(texture) {
+  if (!texture?.image?.height) {
+    return { texelWidth: 1 / 256, texelHeight: 1 / 256, maxMip: 8 };
+  }
+  const imageHeight = texture.image.height;
+  const maxMip = Math.log2(imageHeight) - 2;
+  const texelHeight = 1 / imageHeight;
+  const texelWidth = 1 / (3 * Math.max(Math.pow(2, maxMip), 7 * 16));
+  return { texelWidth, texelHeight, maxMip };
+}
+
+function updateEnvironmentUniforms() {
+  if (!material) {
+    return;
+  }
+  const texture = environmentTexture || fallbackEnvTexture;
+  const params = getCubeUVParams(texture);
+  material.uniforms.envMapTex.value = texture;
+  material.uniforms.envMapTexelWidth.value = params.texelWidth;
+  material.uniforms.envMapTexelHeight.value = params.texelHeight;
+  material.uniforms.envMapMaxMip.value = params.maxMip;
+  material.uniforms.hasEnvMap.value = environmentTexture ? 1 : 0;
+}
+
+function updateEnvironmentRotationUniform() {
+  if (!material) {
+    return;
+  }
+  const yaw = THREE.MathUtils.degToRad(valueOrDefault(envRotationYawInput, 0));
+  const pitch = THREE.MathUtils.degToRad(valueOrDefault(envRotationPitchInput, 0));
+  const roll = THREE.MathUtils.degToRad(valueOrDefault(envRotationRollInput, 0));
+  const matrix = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(pitch, yaw, roll, "YXZ")).invert();
+  material.uniforms.envRotationMatrix.value.setFromMatrix4(matrix);
+}
+
+function getSpotDirection() {
+  const yaw = THREE.MathUtils.degToRad(spotlightState.yawDeg);
+  const pitch = THREE.MathUtils.degToRad(spotlightState.pitchDeg);
+  spotDirection.set(
+    Math.sin(yaw) * Math.cos(pitch),
+    Math.sin(pitch),
+    Math.cos(yaw) * Math.cos(pitch)
+  );
+  return spotDirection.normalize();
+}
+
+function updateSpotlightFromState() {
+  const direction = getSpotDirection();
+  const distance = Math.max(sceneRadius * spotlightState.distance, sceneRadius * 0.2);
+  spotPosition.copy(controls.target).addScaledVector(direction, distance);
+  const targetDirection = controls.target.clone().sub(spotPosition).normalize();
+  if (!material) {
+    return;
+  }
+  material.uniforms.spotPosition.value.copy(spotPosition);
+  material.uniforms.spotDirection.value.copy(targetDirection);
+  material.uniforms.spotConeCos.value = Math.cos(THREE.MathUtils.degToRad(spotlightState.coneDeg));
+  material.uniforms.spotSoftness.value = spotlightState.softness;
+}
+
+function updateLightingUi() {
+  const currentMode = valueOrDefault(lightingModeInput, 0);
+  lightingSections.forEach((section) => {
+    const name = section.getAttribute("data-light-section");
+    const visible = (name === "headlight" && currentMode === 0) || (name === "spotlight" && currentMode === 1) || (name === "envmap" && currentMode === 2);
+    section.style.display = visible ? (section.tagName === "DIV" ? "grid" : "grid") : "none";
+  });
+}
+
+function syncLightingControls() {
+  spotlightState.distance = valueOrDefault(spotDistanceInput, spotlightState.distance);
+  const uiYaw = valueOrDefault(spotYawInput, spotlightState.yawDeg);
+  const uiPitch = valueOrDefault(spotPitchInput, spotlightState.pitchDeg);
+  spotlightState.coneDeg = valueOrDefault(spotConeInput, spotlightState.coneDeg);
+  spotlightState.softness = valueOrDefault(spotSoftnessInput, spotlightState.softness);
+  spotlightState.auto = Boolean(spotAutoInput?.checked);
+  if (!spotlightState.auto) {
+    spotlightState.yawDeg = uiYaw;
+    spotlightState.pitchDeg = uiPitch;
+    spotlightState.autoBaseYawDeg = uiYaw;
+    spotlightState.autoBasePitchDeg = uiPitch;
+  }
+
+  if (lightIntensityValue) lightIntensityValue.textContent = valueOrDefault(lightIntensityInput, 1.4).toFixed(2);
+  if (headlightRangeValue) headlightRangeValue.textContent = valueOrDefault(headlightRangeInput, 0.75).toFixed(2);
+  if (spotDistanceValue) spotDistanceValue.textContent = spotlightState.distance.toFixed(2);
+  if (spotYawValue) spotYawValue.textContent = `${spotlightState.yawDeg.toFixed(0)}°`;
+  if (spotPitchValue) spotPitchValue.textContent = `${spotlightState.pitchDeg.toFixed(0)}°`;
+  if (spotConeValue) spotConeValue.textContent = `${spotlightState.coneDeg.toFixed(0)}°`;
+  if (spotSoftnessValue) spotSoftnessValue.textContent = spotlightState.softness.toFixed(2);
+  if (envIntensityValue) envIntensityValue.textContent = valueOrDefault(envIntensityInput, 1).toFixed(2);
+  if (envRotationYawValue) envRotationYawValue.textContent = `${valueOrDefault(envRotationYawInput, 0).toFixed(0)}°`;
+  if (envRotationPitchValue) envRotationPitchValue.textContent = `${valueOrDefault(envRotationPitchInput, 0).toFixed(0)}°`;
+  if (envRotationRollValue) envRotationRollValue.textContent = `${valueOrDefault(envRotationRollInput, 0).toFixed(0)}°`;
+  updateLightingUi();
+
+  if (!material) {
+    return;
+  }
+
+  material.uniforms.lightingMode.value = valueOrDefault(lightingModeInput, 0);
+  material.uniforms.lightIntensity.value = valueOrDefault(lightIntensityInput, 1.4);
+  material.uniforms.headlightRange.value = valueOrDefault(headlightRangeInput, 0.75);
+  material.uniforms.envIntensity.value = valueOrDefault(envIntensityInput, 1);
+  updateEnvironmentRotationUniform();
+  updateEnvironmentUniforms();
+
+  updateSpotlightFromState();
+
+  const lightingMode = valueOrDefault(lightingModeInput, 0);
+
+  if (environmentTexture && lightingMode === 2) {
+    scene.background = environmentTexture;
+    scene.backgroundIntensity = valueOrDefault(envIntensityInput, 1);
+    scene.backgroundBlurriness = 0;
+    scene.backgroundRotation.set(
+      THREE.MathUtils.degToRad(valueOrDefault(envRotationPitchInput, 0)),
+      THREE.MathUtils.degToRad(valueOrDefault(envRotationYawInput, 0)),
+      THREE.MathUtils.degToRad(valueOrDefault(envRotationRollInput, 0)),
+      "YXZ"
+    );
+  } else {
+    scene.background = null;
+    scene.backgroundIntensity = 1;
+    scene.backgroundBlurriness = 0;
+    scene.backgroundRotation.set(0, 0, 0);
+  }
+}
+
+function updateAutoSpotlight(timeMs) {
+  if (!spotlightState.auto) {
+    return;
+  }
+  const t = timeMs * 0.001;
+  spotlightState.yawDeg = spotlightState.autoBaseYawDeg + t * 38.0 + Math.sin(t * 0.37) * 22.0;
+  spotlightState.pitchDeg = THREE.MathUtils.clamp(
+    spotlightState.autoBasePitchDeg + Math.sin(t * 0.23) * 28.0 + Math.cos(t * 0.11) * 14.0,
+    -78,
+    78
+  );
+  if (spotYawValue) spotYawValue.textContent = `${spotlightState.yawDeg.toFixed(0)}°`;
+  if (spotPitchValue) spotPitchValue.textContent = `${spotlightState.pitchDeg.toFixed(0)}°`;
+}
+
 function createProductMaterial(textures, metadata) {
   const psRange = metadata.encoding.ps.range[1];
   const axRange = metadata.encoding.axay.range;
@@ -353,9 +610,21 @@ function createProductMaterial(textures, metadata) {
       psRange: { value: psRange },
       axayMin: { value: axRange[0] },
       axayMax: { value: axRange[1] },
+      lightingMode: { value: valueOrDefault(lightingModeInput, 0) },
       keyLightDir: { value: new THREE.Vector3(0.35, 0.62, 0.7).normalize() },
-      lightIntensity: { value: Number(lightIntensityInput.value) },
-      headlightRange: { value: Number(headlightRangeInput.value) },
+      lightIntensity: { value: valueOrDefault(lightIntensityInput, 1.4) },
+      headlightRange: { value: valueOrDefault(headlightRangeInput, 0.75) },
+      spotPosition: { value: new THREE.Vector3(0, sceneRadius * 2.2, sceneRadius * 2.2) },
+      spotDirection: { value: new THREE.Vector3(0, 0, -1) },
+      spotConeCos: { value: Math.cos(THREE.MathUtils.degToRad(spotlightState.coneDeg)) },
+      spotSoftness: { value: spotlightState.softness },
+      envMapTex: { value: environmentTexture || fallbackEnvTexture },
+      hasEnvMap: { value: environmentTexture ? 1 : 0 },
+      envIntensity: { value: valueOrDefault(envIntensityInput, 1) },
+      envRotationMatrix: { value: new THREE.Matrix3() },
+      envMapTexelWidth: { value: 1 / 256 },
+      envMapTexelHeight: { value: 1 / 256 },
+      envMapMaxMip: { value: 8 },
       sceneRadius: { value: sceneRadius },
     },
     vertexShader: `
@@ -390,9 +659,21 @@ function createProductMaterial(textures, metadata) {
       uniform float psRange;
       uniform float axayMin;
       uniform float axayMax;
+      uniform int lightingMode;
       uniform vec3 keyLightDir;
       uniform float lightIntensity;
       uniform float headlightRange;
+      uniform vec3 spotPosition;
+      uniform vec3 spotDirection;
+      uniform float spotConeCos;
+      uniform float spotSoftness;
+      uniform sampler2D envMapTex;
+      uniform int hasEnvMap;
+      uniform float envIntensity;
+      uniform mat3 envRotationMatrix;
+      uniform float envMapTexelWidth;
+      uniform float envMapTexelHeight;
+      uniform float envMapMaxMip;
       uniform float sceneRadius;
       varying vec2 vUv;
       varying vec3 vNormal;
@@ -428,6 +709,119 @@ function createProductMaterial(textures, metadata) {
         float d = 1.0 / (3.14159265359 * ax * ay * len2 * len2 + 1e-6);
         float g = ggxG1Aniso(wi, ax, ay) * ggxG1Aniso(wo, ax, ay);
         return d * fresnel * g / (4.0 * wi.z * wo.z + 1e-6);
+      }
+
+      float saturate(float value) {
+        return clamp(value, 0.0, 1.0);
+      }
+
+      float getFace(vec3 direction) {
+        vec3 absDirection = abs(direction);
+        float face = -1.0;
+        if (absDirection.x > absDirection.z) {
+          if (absDirection.x > absDirection.y) {
+            face = direction.x > 0.0 ? 0.0 : 3.0;
+          } else {
+            face = direction.y > 0.0 ? 1.0 : 4.0;
+          }
+        } else {
+          if (absDirection.z > absDirection.y) {
+            face = direction.z > 0.0 ? 2.0 : 5.0;
+          } else {
+            face = direction.y > 0.0 ? 1.0 : 4.0;
+          }
+        }
+        return face;
+      }
+
+      vec2 getUV(vec3 direction, float face) {
+        vec2 uv;
+        if (face == 0.0) {
+          uv = vec2(direction.z, direction.y) / abs(direction.x);
+        } else if (face == 1.0) {
+          uv = vec2(-direction.x, -direction.z) / abs(direction.y);
+        } else if (face == 2.0) {
+          uv = vec2(-direction.x, direction.y) / abs(direction.z);
+        } else if (face == 3.0) {
+          uv = vec2(-direction.z, direction.y) / abs(direction.x);
+        } else if (face == 4.0) {
+          uv = vec2(-direction.x, direction.z) / abs(direction.y);
+        } else {
+          uv = vec2(direction.x, direction.y) / abs(direction.z);
+        }
+        return 0.5 * (uv + 1.0);
+      }
+
+      vec3 bilinearCubeUV(sampler2D envMap, vec3 direction, float mipInt) {
+        float face = getFace(direction);
+        float filterInt = max(4.0 - mipInt, 0.0);
+        mipInt = max(mipInt, 4.0);
+        float faceSize = exp2(mipInt);
+        highp vec2 uv = getUV(direction, face) * (faceSize - 2.0) + 1.0;
+        if (face > 2.0) {
+          uv.y += faceSize;
+          face -= 3.0;
+        }
+        uv.x += face * faceSize;
+        uv.x += filterInt * 3.0 * 16.0;
+        uv.y += 4.0 * (exp2(envMapMaxMip) - faceSize);
+        uv.x *= envMapTexelWidth;
+        uv.y *= envMapTexelHeight;
+        return texture2D(envMap, uv).rgb;
+      }
+
+      float roughnessToMip(float roughness) {
+        float mip = 0.0;
+        if (roughness >= 0.8) {
+          mip = (1.0 - roughness) * (-1.0 + 2.0) / (1.0 - 0.8) - 2.0;
+        } else if (roughness >= 0.4) {
+          mip = (0.8 - roughness) * (2.0 + 1.0) / (0.8 - 0.4) - 1.0;
+        } else if (roughness >= 0.305) {
+          mip = (0.4 - roughness) * (3.0 - 2.0) / (0.4 - 0.305) + 2.0;
+        } else if (roughness >= 0.21) {
+          mip = (0.305 - roughness) * (4.0 - 3.0) / (0.305 - 0.21) + 3.0;
+        } else {
+          mip = -2.0 * log2(1.16 * roughness);
+        }
+        return mip;
+      }
+
+      vec3 textureCubeUVCompat(vec3 sampleDir, float roughness) {
+        float mip = clamp(roughnessToMip(roughness), -2.0, envMapMaxMip);
+        float mipF = fract(mip);
+        float mipInt = floor(mip);
+        vec3 color0 = bilinearCubeUV(envMapTex, sampleDir, mipInt);
+        if (mipF == 0.0) {
+          return color0;
+        }
+        vec3 color1 = bilinearCubeUV(envMapTex, sampleDir, mipInt + 1.0);
+        return mix(color0, color1, mipF);
+      }
+
+      vec2 DFGApprox(vec3 normal, vec3 viewDir, float roughness) {
+        float dotNV = saturate(dot(normal, viewDir));
+        vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+        vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+        vec4 r = roughness * c0 + c1;
+        float a004 = min(r.x * r.x, exp2(-9.28 * dotNV)) * r.x + r.y;
+        return vec2(-1.04, 1.04) * a004 + r.zw;
+      }
+
+      vec3 environmentBRDF(vec3 normal, vec3 viewDir, vec3 specularColor, vec3 specularF90, float roughness) {
+        vec2 fab = DFGApprox(normal, viewDir, roughness);
+        return specularColor * fab.x + specularF90 * fab.y;
+      }
+
+      vec3 sampleEnvIrradiance(vec3 normal) {
+        vec3 worldNormal = normalize(envRotationMatrix * normal);
+        return 3.14159265359 * textureCubeUVCompat(worldNormal, 1.0);
+      }
+
+      vec3 sampleEnvRadiance(vec3 viewDir, vec3 normal, float roughness) {
+        vec3 reflectVec = reflect(-viewDir, normal);
+        reflectVec = normalize(mix(reflectVec, normal, roughness * roughness));
+        reflectVec = normalize(envRotationMatrix * reflectVec);
+        return textureCubeUVCompat(reflectVec, roughness);
       }
 
       void main() {
@@ -480,27 +874,56 @@ function createProductMaterial(textures, metadata) {
         vec3 cameraToPoint = vWorldPos - cameraPosition;
         vec3 lightWorld = normalize(-cameraToPoint);
         vec3 wi = worldToLocal * lightWorld;
-        vec3 wo = worldToLocal * normalize(cameraPosition - vWorldPos);
+        vec3 worldViewDir = normalize(cameraPosition - vWorldPos);
+        vec3 wo = worldToLocal * worldViewDir;
         if (wo.z < 0.0) {
           n = -n;
           t = -t;
           b = normalize(cross(n, t));
           worldToLocal = transpose(mat3(t, b, n));
           wi = worldToLocal * lightWorld;
-          wo = worldToLocal * normalize(cameraPosition - vWorldPos);
+          wo = worldToLocal * worldViewDir;
         }
         float ndl = max(wi.z, 0.0);
-        vec3 beamAxis = normalize(keyLightDir);
-        float axisDistance = max(dot(cameraToPoint, beamAxis), 0.0);
-        vec3 closestOnAxis = beamAxis * axisDistance;
-        float lateralDistance = length(cameraToPoint - closestOnAxis);
-        float beamRadius = max(headlightRange * sceneRadius, 1e-4);
-        float normalizedLateral = lateralDistance / beamRadius;
-        float attenuation = 1.0 / (1.0 + normalizedLateral * normalizedLateral * normalizedLateral * normalizedLateral);
-        attenuation = axisDistance > 0.0 ? attenuation : 0.0;
         float brdfSpec = ggxAniso(wi, wo, max(axay.x, 0.006), max(axay.y, 0.006));
         vec3 brdf = pd / 3.14159265359 + ps * brdfSpec;
-        vec3 color = brdf * ndl * lightIntensity * attenuation + pd * 0.05;
+        vec3 color = pd * 0.04;
+
+        if (lightingMode == 0) {
+          vec3 beamAxis = normalize(keyLightDir);
+          float axisDistance = max(dot(cameraToPoint, beamAxis), 0.0);
+          vec3 closestOnAxis = beamAxis * axisDistance;
+          float lateralDistance = length(cameraToPoint - closestOnAxis);
+          float beamRadius = max(headlightRange * sceneRadius, 1e-4);
+          float normalizedLateral = lateralDistance / beamRadius;
+          float attenuation = 1.0 / (1.0 + normalizedLateral * normalizedLateral * normalizedLateral * normalizedLateral);
+          attenuation = axisDistance > 0.0 ? attenuation : 0.0;
+          color += brdf * ndl * lightIntensity * attenuation;
+        } else if (lightingMode == 1) {
+          vec3 lightVec = spotPosition - vWorldPos;
+          float distanceToLight = length(lightVec);
+          vec3 lightDirWorld = lightVec / max(distanceToLight, 1e-5);
+          wi = worldToLocal * lightDirWorld;
+          ndl = max(wi.z, 0.0);
+          float coneCos = dot(normalize(-spotDirection), lightDirWorld);
+          float edge0 = spotConeCos;
+          float edge1 = mix(spotConeCos, 1.0, 1.0 - spotSoftness);
+          float cone = smoothstep(edge0, max(edge1, edge0 + 1e-4), coneCos);
+          float attenuation = cone / (1.0 + distanceToLight * distanceToLight / max(sceneRadius * sceneRadius, 1e-4));
+          float spec = ggxAniso(wi, wo, max(axay.x, 0.006), max(axay.y, 0.006));
+          color += (pd / 3.14159265359 + ps * spec) * ndl * lightIntensity * attenuation;
+        } else if (hasEnvMap == 1) {
+          vec3 worldNormal = normalize(n);
+          vec3 viewDir = worldViewDir;
+          float roughness = clamp(sqrt(max(axay.x * axay.y, 0.0001)), 0.04, 1.0);
+          vec3 irradiance = sampleEnvIrradiance(worldNormal) * envIntensity;
+          vec3 radiance = sampleEnvRadiance(viewDir, worldNormal, roughness) * envIntensity;
+          vec3 specularColor = ps * 0.04;
+          vec3 specularF90 = ps;
+          color += irradiance * (pd / 3.14159265359);
+          color += radiance * environmentBRDF(worldNormal, viewDir, specularColor, specularF90, roughness);
+        }
+
         gl_FragColor = vec4(pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
       }
     `,
@@ -550,6 +973,9 @@ function frameGeometry(geometry) {
   if (material) {
     material.uniforms.sceneRadius.value = sceneRadius;
   }
+  updateEnvironmentUniforms();
+  updateEnvironmentRotationUniform();
+  updateSpotlightFromState();
 }
 
 function updateHeadlight() {
@@ -560,14 +986,26 @@ function updateHeadlight() {
   material.uniforms.keyLightDir.value.copy(axis);
 }
 
-function syncLightingControls() {
-  lightIntensityValue.textContent = Number(lightIntensityInput.value).toFixed(2);
-  headlightRangeValue.textContent = Number(headlightRangeInput.value).toFixed(2);
-  if (!material) {
-    return;
+async function loadEnvironmentMap(file) {
+  setStatus(`Loading environment ${file.name} ...`);
+  const buffer = await readFileWithProgress(file);
+  const lowerName = file.name.toLowerCase();
+  let texture;
+
+  if (lowerName.endsWith(".hdr")) {
+    texture = createTextureFromLoaderData(rgbeLoader.parse(buffer));
+  } else if (lowerName.endsWith(".exr")) {
+    texture = createTextureFromLoaderData(exrLoader.parse(buffer));
+  } else {
+    throw new Error("Unsupported environment format. Use .hdr or .exr.");
   }
-  material.uniforms.lightIntensity.value = Number(lightIntensityInput.value);
-  material.uniforms.headlightRange.value = Number(headlightRangeInput.value);
+
+  disposeEnvironmentTexture();
+  environmentSourceTexture = configureEnvironmentTexture(texture);
+  environmentPmremTarget = pmremGenerator.fromEquirectangular(environmentSourceTexture);
+  environmentTexture = environmentPmremTarget.texture;
+  syncLightingControls();
+  setStatus(`Loaded environment ${file.name}.`);
 }
 
 syncLightingControls();
@@ -622,6 +1060,9 @@ async function loadResultBin(buffer, fileName) {
   productMesh = new THREE.Mesh(geometry, material);
   scene.add(productMesh);
   frameGeometry(geometry);
+  updateEnvironmentUniforms();
+  updateEnvironmentRotationUniform();
+  syncLightingControls();
   setStatus(
     `Loaded step ${header.metadata.step}, faces ${header.chunks.indices.shape[0].toLocaleString()}, ` +
       `texture ${header.metadata.texture_width}x${header.metadata.texture_height}.`
@@ -672,6 +1113,9 @@ async function loadGlb(buffer, fileName) {
   productMesh = new THREE.Mesh(geometry, material);
   scene.add(productMesh);
   frameGeometry(geometry);
+  updateEnvironmentUniforms();
+  updateEnvironmentRotationUniform();
+  syncLightingControls();
   setStatus(
     `Loaded GLB step ${product.metadata.step}, faces ${(geometry.index.count / 3).toLocaleString()}, ` +
       `texture ${product.metadata.texture_width}x${product.metadata.texture_height}.`
@@ -699,6 +1143,44 @@ flipVInput.addEventListener("change", () => {
 
 lightIntensityInput.addEventListener("input", syncLightingControls);
 headlightRangeInput.addEventListener("input", syncLightingControls);
+if (lightingModeInput) lightingModeInput.addEventListener("change", syncLightingControls);
+if (spotDistanceInput) spotDistanceInput.addEventListener("input", syncLightingControls);
+if (spotYawInput) spotYawInput.addEventListener("input", syncLightingControls);
+if (spotPitchInput) spotPitchInput.addEventListener("input", syncLightingControls);
+if (spotConeInput) spotConeInput.addEventListener("input", syncLightingControls);
+if (spotSoftnessInput) spotSoftnessInput.addEventListener("input", syncLightingControls);
+if (spotAutoInput) {
+  spotAutoInput.addEventListener("change", () => {
+    if (spotAutoInput.checked) {
+      spotlightState.autoBaseYawDeg = valueOrDefault(spotYawInput, spotlightState.yawDeg);
+      spotlightState.autoBasePitchDeg = valueOrDefault(spotPitchInput, spotlightState.pitchDeg);
+    }
+    syncLightingControls();
+  });
+}
+if (envIntensityInput) envIntensityInput.addEventListener("input", syncLightingControls);
+if (envRotationYawInput) envRotationYawInput.addEventListener("input", syncLightingControls);
+if (envRotationPitchInput) envRotationPitchInput.addEventListener("input", syncLightingControls);
+if (envRotationRollInput) envRotationRollInput.addEventListener("input", syncLightingControls);
+if (envMapInput) {
+  envMapInput.addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      loadEnvironmentMap(file).catch((error) => setStatus(error.message));
+    }
+  });
+}
+if (clearEnvMapButton) {
+clearEnvMapButton.addEventListener("click", () => {
+  disposeEnvironmentTexture();
+  if (material) {
+    updateEnvironmentUniforms();
+    updateEnvironmentRotationUniform();
+  }
+  syncLightingControls();
+  setStatus("Environment cleared.");
+});
+}
 
 window.addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -712,10 +1194,12 @@ window.addEventListener("drop", (event) => {
   }
 });
 
-function animate() {
+function animate(timeMs = 0) {
   requestAnimationFrame(animate);
   controls.update();
+  updateAutoSpotlight(timeMs);
   updateHeadlight();
+  updateSpotlightFromState();
   renderer.render(scene, camera);
 }
 

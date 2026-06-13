@@ -32,13 +32,70 @@
           Flip texture V
         </label>
         <label>
+          Lighting
+          <select id="lightingMode">
+            <option value="0" selected>Headlight</option>
+            <option value="1">Spotlight</option>
+            <option value="2">Environment map</option>
+          </select>
+        </label>
+        <label>
           Light intensity <span id="lightIntensityValue">1.40</span>
           <input id="lightIntensity" type="range" min="0" max="6" step="0.05" value="1.4" />
         </label>
-        <label>
+        <label data-light-section="headlight">
           Headlight spread <span id="headlightRangeValue">0.75</span>
           <input id="headlightRange" type="range" min="0.05" max="2.5" step="0.01" value="0.75" />
         </label>
+        <div class="group" data-light-section="spotlight">
+          <label>
+            Spot distance <span id="spotDistanceValue">2.20</span>
+            <input id="spotDistance" type="range" min="0.5" max="6" step="0.05" value="2.2" />
+          </label>
+          <label>
+            Spot yaw <span id="spotYawValue">35°</span>
+            <input id="spotYaw" type="range" min="-180" max="180" step="1" value="35" />
+          </label>
+          <label>
+            Spot pitch <span id="spotPitchValue">18°</span>
+            <input id="spotPitch" type="range" min="-85" max="85" step="1" value="18" />
+          </label>
+          <label>
+            Spot cone <span id="spotConeValue">26°</span>
+            <input id="spotCone" type="range" min="5" max="70" step="1" value="26" />
+          </label>
+          <label>
+            Spot softness <span id="spotSoftnessValue">0.24</span>
+            <input id="spotSoftness" type="range" min="0.02" max="0.8" step="0.01" value="0.24" />
+          </label>
+          <label class="row">
+            <input id="spotAuto" type="checkbox" />
+            Auto orbit spotlight
+          </label>
+        </div>
+        <div class="group" data-light-section="envmap">
+          <label class="file">
+            <input id="envMapInput" type="file" accept=".hdr,.exr,image/vnd.radiance,image/x-exr" />
+            <span>Upload HDR / EXR environment</span>
+          </label>
+          <label>
+            Env intensity <span id="envIntensityValue">1.00</span>
+            <input id="envIntensity" type="range" min="0" max="4" step="0.05" value="1" />
+          </label>
+          <label>
+            Env yaw <span id="envRotationYawValue">0°</span>
+            <input id="envRotationYaw" type="range" min="-180" max="180" step="1" value="0" />
+          </label>
+          <label>
+            Env pitch <span id="envRotationPitchValue">0°</span>
+            <input id="envRotationPitch" type="range" min="-180" max="180" step="1" value="0" />
+          </label>
+          <label>
+            Env roll <span id="envRotationRollValue">0°</span>
+            <input id="envRotationRoll" type="range" min="-180" max="180" step="1" value="0" />
+          </label>
+          <button id="clearEnvMap" type="button">Clear environment</button>
+        </div>
         <p id="status">Drop a <code>result.bin</code> file anywhere, or choose one above.</p>
       </section>
       <canvas id="canvas"></canvas>

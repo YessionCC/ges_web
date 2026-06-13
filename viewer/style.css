@@ -59,6 +59,17 @@ label {
   font-size: 13px;
 }
 
+.group {
+  display: grid;
+  gap: 0;
+  margin-top: 12px;
+  padding-top: 2px;
+}
+
+[data-light-section] {
+  display: none;
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -86,6 +97,21 @@ select {
 
 input[type="range"] {
   accent-color: var(--accent);
+}
+
+button {
+  margin-top: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .file span {
