@@ -1,5 +1,4 @@
 import * as THREE from "./vendor/three.module.js";
-import { OrbitControls } from "./vendor/OrbitControls.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 
 const MAGIC = "GBPRD001";
@@ -22,13 +21,224 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 1000);
 camera.position.set(0, 0.35, 2.2);
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-
 let productMesh = null;
 let material = null;
 let sceneRadius = 1.0;
+
+class QuaternionOrbitController {
+  constructor(camera, domElement) {
+    this.camera = camera;
+    this.domElement = domElement;
+    this.target = new THREE.Vector3();
+    this.rotation = new THREE.Quaternion();
+    this.distance = 2.2;
+    this.minDistance = 0.05;
+    this.maxDistance = Infinity;
+    this.rotateSpeed = 1.8;
+    this.panSpeed = 0.0003;
+    this.zoomSpeed = 0.0002;
+    this.dampingFactor = 0.12;
+    this.enableDamping = true;
+
+    this.state = {
+      dragging: false,
+      button: -1,
+      lastX: 0,
+      lastY: 0,
+    };
+
+    this.panVelocity = new THREE.Vector2();
+    this.zoomVelocity = 0;
+
+    this._offset = new THREE.Vector3();
+    this._right = new THREE.Vector3();
+    this._up = new THREE.Vector3();
+    this._deltaQuat = new THREE.Quaternion();
+    this._arcballStart = new THREE.Vector3();
+    this._arcballEnd = new THREE.Vector3();
+    this._arcballAxis = new THREE.Vector3();
+    this._arcballWorldAxis = new THREE.Vector3();
+    this._arcballLast = null;
+
+    this.domElement.style.touchAction = "none";
+    this._bindEvents();
+    this.syncFromCamera();
+  }
+
+  _bindEvents() {
+    this.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
+    this.domElement.addEventListener("mousedown", this._onMouseDown);
+    window.addEventListener("mousemove", this._onMouseMove);
+    window.addEventListener("mouseup", this._onMouseUp);
+    this.domElement.addEventListener("wheel", this._onWheel, { passive: false });
+  }
+
+  _onMouseDown = (event) => {
+    this.state.dragging = true;
+    this.state.button = event.button;
+    this.state.lastX = event.clientX;
+    this.state.lastY = event.clientY;
+    if (event.button === 0) {
+      this._arcballLast = this._projectArcball(event.clientX, event.clientY);
+    }
+    if (event.button === 1) {
+      event.preventDefault();
+    }
+  };
+
+  _onMouseMove = (event) => {
+    if (!this.state.dragging) {
+      return;
+    }
+    const dx = event.clientX - this.state.lastX;
+    const dy = event.clientY - this.state.lastY;
+    this.state.lastX = event.clientX;
+    this.state.lastY = event.clientY;
+
+    if (this.state.button === 0) {
+      this._applyArcballRotation(event.clientX, event.clientY);
+      return;
+    }
+
+    if (this.state.button === 1 || this.state.button === 2) {
+      this.panVelocity.x += dx;
+      this.panVelocity.y += dy;
+    }
+  };
+
+  _onMouseUp = () => {
+    this.state.dragging = false;
+    this.state.button = -1;
+    this._arcballLast = null;
+  };
+
+  _onWheel = (event) => {
+    event.preventDefault();
+    this.zoomVelocity += event.deltaY * this.zoomSpeed;
+  };
+
+  syncFromCamera() {
+    const lookMatrix = new THREE.Matrix4().lookAt(this.camera.position, this.target, this.camera.up);
+    this.rotation.setFromRotationMatrix(lookMatrix).invert();
+    this.distance = Math.max(this.camera.position.distanceTo(this.target), this.minDistance);
+    this.updateCamera(true);
+  }
+
+  saveState() {
+    this._savedTarget = this.target.clone();
+    this._savedRotation = this.rotation.clone();
+    this._savedDistance = this.distance;
+  }
+
+  reset() {
+    if (!this._savedTarget || !this._savedRotation) {
+      return;
+    }
+    this.target.copy(this._savedTarget);
+    this.rotation.copy(this._savedRotation);
+    this.distance = this._savedDistance;
+    this.panVelocity.set(0, 0);
+    this.zoomVelocity = 0;
+    this._arcballLast = null;
+    this.updateCamera(true);
+  }
+
+  setView(center, offset) {
+    this.target.copy(center);
+    const nextPosition = center.clone().add(offset);
+    this.camera.position.copy(nextPosition);
+    this.syncFromCamera();
+  }
+
+  updateCamera(force = false) {
+    if (!force) {
+      this._applyDeltas();
+    }
+
+    this.distance = THREE.MathUtils.clamp(this.distance, this.minDistance, this.maxDistance);
+    this._offset.set(0, 0, this.distance).applyQuaternion(this.rotation);
+    this.camera.position.copy(this.target).add(this._offset);
+    this.camera.quaternion.copy(this.rotation);
+  }
+
+  update() {
+    this.updateCamera(false);
+  }
+
+  _projectArcball(clientX, clientY) {
+    const rect = this.domElement.getBoundingClientRect();
+    const size = Math.max(Math.min(rect.width, rect.height), 1);
+    const x = ((clientX - rect.left) / size) * 2 - rect.width / size;
+    const y = rect.height / size - ((clientY - rect.top) / size) * 2;
+    const projected = new THREE.Vector3(x, y, 0);
+    const lengthSq = x * x + y * y;
+    if (lengthSq <= 1) {
+      projected.z = Math.sqrt(1 - lengthSq);
+      return projected;
+    }
+    return projected.normalize();
+  }
+
+  _applyArcballRotation(clientX, clientY) {
+    if (!this._arcballLast) {
+      this._arcballLast = this._projectArcball(clientX, clientY);
+      return;
+    }
+
+    this._arcballStart.copy(this._arcballLast);
+    this._arcballEnd.copy(this._projectArcball(clientX, clientY));
+    const dot = THREE.MathUtils.clamp(this._arcballStart.dot(this._arcballEnd), -1, 1);
+
+    if (dot > 0.999999) {
+      this._arcballLast.copy(this._arcballEnd);
+      return;
+    }
+
+    this._arcballAxis.crossVectors(this._arcballStart, this._arcballEnd);
+    if (this._arcballAxis.lengthSq() < 1e-10) {
+      this._arcballLast.copy(this._arcballEnd);
+      return;
+    }
+
+    const angle = Math.acos(dot) * this.rotateSpeed;
+    this._arcballWorldAxis.copy(this._arcballAxis).normalize().applyQuaternion(this.rotation).normalize();
+    this._deltaQuat.setFromAxisAngle(this._arcballWorldAxis, -angle);
+    this.rotation.premultiply(this._deltaQuat).normalize();
+    this._arcballLast.copy(this._arcballEnd);
+  }
+
+  _applyDeltas() {
+    const panX = this.panVelocity.x;
+    const panY = this.panVelocity.y;
+    const zoom = this.zoomVelocity;
+
+    if (panX !== 0 || panY !== 0) {
+      this._right.set(1, 0, 0).applyQuaternion(this.rotation);
+      this._up.set(0, 1, 0).applyQuaternion(this.rotation);
+      const scale = this.distance * this.panSpeed;
+      this.target.addScaledVector(this._right, -panX * scale);
+      this.target.addScaledVector(this._up, panY * scale);
+    }
+
+    if (zoom !== 0) {
+      this.distance *= 1 + zoom;
+    }
+
+    if (this.enableDamping) {
+      const decay = Math.max(0, 1 - this.dampingFactor);
+      this.panVelocity.multiplyScalar(decay);
+      this.zoomVelocity *= decay;
+      if (Math.abs(this.zoomVelocity) < 1e-5) {
+        this.zoomVelocity = 0;
+      }
+    } else {
+      this.panVelocity.set(0, 0);
+      this.zoomVelocity = 0;
+    }
+  }
+}
+
+const controls = new QuaternionOrbitController(camera, renderer.domElement);
 
 function setStatus(message) {
   statusEl.textContent = message;
@@ -329,8 +539,10 @@ function frameGeometry(geometry) {
   const center = sphere.center;
   const radius = Math.max(sphere.radius, 1e-4);
   sceneRadius = radius;
-  controls.target.copy(center);
-  camera.position.copy(center).add(new THREE.Vector3(0, radius * 0.35, radius * 2.5));
+  controls.minDistance = radius * 0.2;
+  controls.maxDistance = radius * 30;
+  controls.setView(center, new THREE.Vector3(0, radius * 0.35, radius * 2.5));
+  controls.saveState();
   camera.near = radius / 1000;
   camera.far = radius * 1000;
   camera.updateProjectionMatrix();
