@@ -121,6 +121,12 @@ select {
   padding: 10px 12px;
 }
 
+select,
+option {
+  background-color: #1a1d21;
+  color: var(--text);
+}
+
 input[type="range"] {
   accent-color: var(--accent);
 }

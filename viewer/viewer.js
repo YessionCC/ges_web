@@ -3,7 +3,6 @@ import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RGBELoader } from "./vendor/RGBELoader.js";
 import { EXRLoader } from "./vendor/EXRLoader.js";
 
-const MAGIC = "GBPRD001";
 const canvas = document.getElementById("canvas");
 const statusEl = document.getElementById("status");
 const fileInput = document.getElementById("fileInput");
@@ -108,8 +107,8 @@ const previewRight = new THREE.Vector3();
 const previewUp = new THREE.Vector3();
 const previewForward = new THREE.Vector3();
 
-let productMesh = null;
-let material = null;
+let productRoot = null;
+let productMaterials = [];
 let sceneRadius = 1.0;
 let environmentTexture = null;
 let environmentSourceTexture = null;
@@ -372,77 +371,6 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-function parseHeader(buffer) {
-  const magic = new TextDecoder().decode(new Uint8Array(buffer, 0, 8));
-  if (magic !== MAGIC) {
-    throw new Error(`Unexpected magic: ${magic}`);
-  }
-  const view = new DataView(buffer);
-  const headerLength = view.getUint32(8, true);
-  return JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 12, headerLength)));
-}
-
-function typedArray(buffer, chunk) {
-  const nbytes = chunk.nbytes;
-  const offset = chunk.offset;
-  if (chunk.dtype === "float32") {
-    return new Float32Array(buffer, offset, nbytes / 4);
-  }
-  if (chunk.dtype === "uint32") {
-    return new Uint32Array(buffer, offset, nbytes / 4);
-  }
-  if (chunk.dtype === "uint8") {
-    return new Uint8Array(buffer, offset, nbytes);
-  }
-  throw new Error(`Unsupported dtype: ${chunk.dtype}`);
-}
-
-function makeTexture(buffer, header, name) {
-  const chunk = header.chunks[name];
-  const shape = chunk.shape;
-  const height = shape[0];
-  const width = shape[1];
-  const channels = shape[2];
-  const source = typedArray(buffer, chunk);
-  let data = source;
-  if (channels !== 4) {
-    data = new Uint8Array(width * height * 4);
-    const pixelCount = width * height;
-    for (let index = 0; index < pixelCount; index += 1) {
-      const src = index * channels;
-      const dst = index * 4;
-      data[dst] = source[src];
-      data[dst + 1] = channels > 1 ? source[src + 1] : source[src];
-      data[dst + 2] = channels > 2 ? source[src + 2] : 0;
-      data[dst + 3] = 255;
-    }
-  }
-  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
-  texture.internalFormat = "RGBA8";
-  texture.flipY = false;
-  texture.generateMipmaps = false;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.unpackAlignment = 1;
-  texture.needsUpdate = true;
-  return texture;
-}
-
-function ensureTextureFits(header) {
-  const maxTextureSize = renderer.capabilities.maxTextureSize;
-  for (const name of ["pd", "ps", "axay", "normal", "tangent"]) {
-    const shape = header.chunks[name].shape;
-    if (shape[0] > maxTextureSize || shape[1] > maxTextureSize) {
-      throw new Error(
-        `${name} texture is ${shape[1]}x${shape[0]}, but this GPU reports max texture size ${maxTextureSize}. ` +
-          "Re-export a smaller WebGL package."
-      );
-    }
-  }
-}
-
 function prepareProductTexture(texture) {
   texture.flipY = false;
   texture.generateMipmaps = false;
@@ -529,21 +457,47 @@ function getCubeUVParams(texture) {
   return { texelWidth, texelHeight, maxMip };
 }
 
+function hasProductMaterials() {
+  return productMaterials.length > 0;
+}
+
+function forEachProductMaterial(callback) {
+  for (const productMaterial of productMaterials) {
+    callback(productMaterial);
+  }
+}
+
+function clearProductScene() {
+  if (productRoot) {
+    scene.remove(productRoot);
+    productRoot.traverse((object) => {
+      if (object.isMesh) {
+        object.geometry?.dispose();
+      }
+    });
+    productRoot = null;
+  }
+  forEachProductMaterial((productMaterial) => productMaterial.dispose());
+  productMaterials = [];
+}
+
 function updateEnvironmentUniforms() {
-  if (!material) {
+  if (!hasProductMaterials()) {
     return;
   }
   const texture = environmentTexture || fallbackEnvTexture;
   const params = getCubeUVParams(texture);
-  material.uniforms.envMapTex.value = texture;
-  material.uniforms.envMapTexelWidth.value = params.texelWidth;
-  material.uniforms.envMapTexelHeight.value = params.texelHeight;
-  material.uniforms.envMapMaxMip.value = params.maxMip;
-  material.uniforms.hasEnvMap.value = environmentTexture ? 1 : 0;
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.envMapTex.value = texture;
+    productMaterial.uniforms.envMapTexelWidth.value = params.texelWidth;
+    productMaterial.uniforms.envMapTexelHeight.value = params.texelHeight;
+    productMaterial.uniforms.envMapMaxMip.value = params.maxMip;
+    productMaterial.uniforms.hasEnvMap.value = environmentTexture ? 1 : 0;
+  });
 }
 
 function updateEnvironmentRotationUniform() {
-  if (!material) {
+  if (!hasProductMaterials()) {
     updateEnvPreview();
     return;
   }
@@ -551,7 +505,9 @@ function updateEnvironmentRotationUniform() {
   const pitch = THREE.MathUtils.degToRad(valueOrDefault(envRotationPitchInput, 0));
   const roll = THREE.MathUtils.degToRad(valueOrDefault(envRotationRollInput, 0));
   const matrix = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(pitch, yaw, roll, "YXZ")).invert();
-  material.uniforms.envRotationMatrix.value.setFromMatrix4(matrix);
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.envRotationMatrix.value.setFromMatrix4(matrix);
+  });
   updateEnvPreview();
 }
 
@@ -612,13 +568,16 @@ function updateSpotlightFromState() {
   const distance = Math.max(sceneRadius * spotlightState.distance, sceneRadius * 0.2);
   spotPosition.copy(controls.target).addScaledVector(direction, distance);
   const targetDirection = controls.target.clone().sub(spotPosition).normalize();
-  if (!material) {
+  if (!hasProductMaterials()) {
     return;
   }
-  material.uniforms.spotPosition.value.copy(spotPosition);
-  material.uniforms.spotDirection.value.copy(targetDirection);
-  material.uniforms.spotConeCos.value = Math.cos(THREE.MathUtils.degToRad(spotlightState.coneDeg));
-  material.uniforms.spotSoftness.value = spotlightState.softness;
+  const spotConeCos = Math.cos(THREE.MathUtils.degToRad(spotlightState.coneDeg));
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.spotPosition.value.copy(spotPosition);
+    productMaterial.uniforms.spotDirection.value.copy(targetDirection);
+    productMaterial.uniforms.spotConeCos.value = spotConeCos;
+    productMaterial.uniforms.spotSoftness.value = spotlightState.softness;
+  });
 }
 
 function updateLightingUi() {
@@ -679,14 +638,20 @@ function syncLightingControls() {
 
   updateEnvPreview();
 
-  if (!material) {
+  if (!hasProductMaterials()) {
     return;
   }
 
-  material.uniforms.lightingMode.value = valueOrDefault(lightingModeInput, 0);
-  material.uniforms.lightIntensity.value = valueOrDefault(lightIntensityInput, 1.4);
-  material.uniforms.headlightRange.value = valueOrDefault(headlightRangeInput, 0.75);
-  material.uniforms.envIntensity.value = valueOrDefault(envIntensityInput, 1);
+  const lightingModeValue = valueOrDefault(lightingModeInput, 0);
+  const lightIntensity = valueOrDefault(lightIntensityInput, 1.4);
+  const headlightRange = valueOrDefault(headlightRangeInput, 0.75);
+  const envIntensity = valueOrDefault(envIntensityInput, 1);
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.lightingMode.value = lightingModeValue;
+    productMaterial.uniforms.lightIntensity.value = lightIntensity;
+    productMaterial.uniforms.headlightRange.value = headlightRange;
+    productMaterial.uniforms.envIntensity.value = envIntensity;
+  });
   updateEnvironmentRotationUniform();
   updateEnvironmentUniforms();
 
@@ -1044,34 +1009,9 @@ function createProductMaterial(textures, metadata) {
   });
 }
 
-function createMaterial(buffer, header) {
-  return createProductMaterial(
-    {
-      pd: makeTexture(buffer, header, "pd"),
-      ps: makeTexture(buffer, header, "ps"),
-      axay: makeTexture(buffer, header, "axay"),
-      normal: makeTexture(buffer, header, "normal"),
-      tangent: makeTexture(buffer, header, "tangent"),
-    },
-    header.metadata
-  );
-}
-
-function createGeometry(buffer, header) {
-  const positions = typedArray(buffer, header.chunks.positions);
-  const uvs = typedArray(buffer, header.chunks.uvs);
-  const indices = typedArray(buffer, header.chunks.indices);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeVertexNormals();
-  geometry.computeBoundingSphere();
-  return geometry;
-}
-
-function frameGeometry(geometry) {
-  const sphere = geometry.boundingSphere;
+function frameProductScene(root) {
+  const bounds = new THREE.Box3().setFromObject(root);
+  const sphere = bounds.getBoundingSphere(new THREE.Sphere());
   const center = sphere.center;
   const radius = Math.max(sphere.radius, 1e-4);
   sceneRadius = radius;
@@ -1083,20 +1023,22 @@ function frameGeometry(geometry) {
   camera.far = radius * 1000;
   camera.updateProjectionMatrix();
   controls.update();
-  if (material) {
-    material.uniforms.sceneRadius.value = sceneRadius;
-  }
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.sceneRadius.value = sceneRadius;
+  });
   updateEnvironmentUniforms();
   updateEnvironmentRotationUniform();
   updateSpotlightFromState();
 }
 
 function updateHeadlight() {
-  if (!material) {
+  if (!hasProductMaterials()) {
     return;
   }
   const axis = controls.target.clone().sub(camera.position).normalize();
-  material.uniforms.keyLightDir.value.copy(axis);
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.keyLightDir.value.copy(axis);
+  });
 }
 
 async function loadEnvironmentMap(file) {
@@ -1146,42 +1088,10 @@ async function loadFile(file) {
   setStatus(`Loading ${file.name} ...`);
   await new Promise((resolve) => setTimeout(resolve, 20));
   const buffer = await readFileWithProgress(file);
-  if (file.name.toLowerCase().endsWith(".glb")) {
-    await loadGlb(buffer, file.name);
-    return;
+  if (!file.name.toLowerCase().endsWith(".glb")) {
+    throw new Error("Unsupported model format. Please load a .glb file.");
   }
-  await loadResultBin(buffer, file.name);
-}
-
-async function loadResultBin(buffer, fileName) {
-  const header = parseHeader(buffer);
-  ensureTextureFits(header);
-  setStatus(
-    `Parsed result.bin. Geometry faces ${header.chunks.indices.shape[0].toLocaleString()}, ` +
-      `textures ${header.metadata.texture_width}x${header.metadata.texture_height}. Creating buffers ...`
-  );
-  await new Promise((resolve) => setTimeout(resolve, 20));
-
-  if (productMesh !== null) {
-    scene.remove(productMesh);
-    productMesh.geometry.dispose();
-    productMesh.material.dispose();
-  }
-
-  const geometry = createGeometry(buffer, header);
-  setStatus("Uploading material textures to GPU ...");
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  material = createMaterial(buffer, header);
-  productMesh = new THREE.Mesh(geometry, material);
-  scene.add(productMesh);
-  frameGeometry(geometry);
-  updateEnvironmentUniforms();
-  updateEnvironmentRotationUniform();
-  syncLightingControls();
-  setStatus(
-    `Loaded step ${header.metadata.step}, faces ${header.chunks.indices.shape[0].toLocaleString()}, ` +
-      `texture ${header.metadata.texture_width}x${header.metadata.texture_height}.`
-  );
+  await loadGlb(buffer, file.name);
 }
 
 function parseGlb(buffer) {
@@ -1194,46 +1104,100 @@ function parseGlb(buffer) {
 async function loadGlb(buffer, fileName) {
   setStatus(`Parsing ${fileName} ...`);
   const gltf = await parseGlb(buffer);
-  const json = gltf.parser.json;
-  const product = json.materials?.[0]?.extras?.guoboProduct;
-  if (!product) {
-    throw new Error("GLB does not contain guoboProduct material extras.");
+  const jsonMaterials = gltf.parser.json.materials || [];
+  const materialCache = new Map();
+  const textureCache = new Map();
+  const originalMaterials = new Set();
+  const productMetadataList = [];
+  let primitiveCount = 0;
+  let faceCount = 0;
+
+  async function getTexture(textureIndex) {
+    if (!textureCache.has(textureIndex)) {
+      textureCache.set(textureIndex, await gltf.parser.getDependency("texture", textureIndex));
+    }
+    return textureCache.get(textureIndex);
   }
 
-  const textures = {};
-  for (const name of ["pd", "ps", "axay", "normal", "tangent"]) {
-    const textureIndex = product.textures[name];
-    textures[name] = await gltf.parser.getDependency("texture", textureIndex);
+  async function buildMaterialFromIndex(materialIndex) {
+    if (materialCache.has(materialIndex)) {
+      return materialCache.get(materialIndex);
+    }
+
+    const materialDef = jsonMaterials[materialIndex];
+    const product = materialDef?.extras?.guoboProduct;
+    if (!product) {
+      throw new Error(`Material ${materialIndex} does not contain guoboProduct extras.`);
+    }
+
+    const textures = {};
+    for (const name of ["pd", "ps", "axay", "normal", "tangent"]) {
+      const textureIndex = product.textures?.[name];
+      if (textureIndex == null) {
+        throw new Error(`Material ${materialIndex} is missing guoboProduct texture "${name}".`);
+      }
+      textures[name] = await getTexture(textureIndex);
+    }
+
+    const productMaterial = createProductMaterial(textures, product.metadata);
+    materialCache.set(materialIndex, productMaterial);
+    productMetadataList.push(product.metadata);
+    return productMaterial;
   }
 
-  let loadedMesh = null;
+  const meshObjects = [];
   gltf.scene.traverse((object) => {
-    if (loadedMesh === null && object.isMesh) {
-      loadedMesh = object;
+    if (object.isMesh) {
+      meshObjects.push(object);
     }
   });
-  if (loadedMesh === null) {
-    throw new Error("GLB does not contain a mesh.");
+
+  if (meshObjects.length === 0) {
+    throw new Error("GLB does not contain any mesh primitives.");
   }
 
-  if (productMesh !== null) {
-    scene.remove(productMesh);
-    productMesh.geometry.dispose();
-    productMesh.material.dispose();
+  for (const object of meshObjects) {
+    const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
+    const nextMaterials = [];
+
+    for (const sourceMaterial of sourceMaterials) {
+      originalMaterials.add(sourceMaterial);
+      const association = gltf.parser.associations.get(sourceMaterial);
+      const materialIndex = association?.materials;
+      if (materialIndex == null) {
+        throw new Error(`A mesh primitive in ${fileName} is missing a linked glTF material.`);
+      }
+      nextMaterials.push(await buildMaterialFromIndex(materialIndex));
+      primitiveCount += 1;
+    }
+
+    object.material = Array.isArray(object.material) ? nextMaterials : nextMaterials[0];
+
+    const geometry = object.geometry;
+    if (geometry && !geometry.boundingSphere) {
+      geometry.computeBoundingSphere();
+    }
+    if (geometry?.index) {
+      faceCount += geometry.index.count / 3;
+    } else if (geometry?.attributes?.position) {
+      faceCount += geometry.attributes.position.count / 3;
+    }
   }
 
-  const geometry = loadedMesh.geometry;
-  geometry.computeBoundingSphere();
-  material = createProductMaterial(textures, product.metadata);
-  productMesh = new THREE.Mesh(geometry, material);
-  scene.add(productMesh);
-  frameGeometry(geometry);
+  clearProductScene();
+  productRoot = gltf.scene;
+  productMaterials = Array.from(materialCache.values());
+  scene.add(productRoot);
+  originalMaterials.forEach((sourceMaterial) => sourceMaterial?.dispose?.());
+
+  frameProductScene(productRoot);
   updateEnvironmentUniforms();
   updateEnvironmentRotationUniform();
   syncLightingControls();
+  const firstMetadata = productMetadataList[0];
+  const stepLabel = firstMetadata?.step != null ? `step ${firstMetadata.step}, ` : "";
   setStatus(
-    `Loaded GLB step ${product.metadata.step}, faces ${(geometry.index.count / 3).toLocaleString()}, ` +
-      `texture ${product.metadata.texture_width}x${product.metadata.texture_height}.`
+    `Loaded GLB ${stepLabel}${faceCount.toLocaleString()} faces across ${primitiveCount} primitives and ${productMaterials.length} materials.`
   );
 }
 
@@ -1245,15 +1209,15 @@ fileInput.addEventListener("change", (event) => {
 });
 
 modeSelect.addEventListener("change", () => {
-  if (material) {
-    material.uniforms.mode.value = Number(modeSelect.value);
-  }
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.mode.value = Number(modeSelect.value);
+  });
 });
 
 flipVInput.addEventListener("change", () => {
-  if (material) {
-    material.uniforms.flipV.value = flipVInput.checked ? 1 : 0;
-  }
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.flipV.value = flipVInput.checked ? 1 : 0;
+  });
 });
 
 lightIntensityInput.addEventListener("input", syncLightingControls);
@@ -1289,7 +1253,7 @@ if (envMapInput) {
 if (clearEnvMapButton) {
 clearEnvMapButton.addEventListener("click", () => {
   disposeEnvironmentTexture();
-  if (material) {
+  if (hasProductMaterials()) {
     updateEnvironmentUniforms();
     updateEnvironmentRotationUniform();
   }

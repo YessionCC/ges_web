@@ -11,8 +11,8 @@
       <section id="panel">
         <h1>Guobo Product Viewer</h1>
         <label class="file">
-          <input id="fileInput" type="file" accept=".bin,.glb,application/octet-stream,model/gltf-binary" />
-          <span>Open result.bin / result_compress.glb</span>
+          <input id="fileInput" type="file" accept=".glb,model/gltf-binary" />
+          <span>Open product .glb</span>
         </label>
         <label>
           Material
@@ -103,7 +103,7 @@
           </label>
           <button id="clearEnvMap" type="button">Clear environment</button>
         </div>
-        <p id="status">Drop a <code>result.bin</code> file anywhere, or choose one above.</p>
+        <p id="status">Drop a <code>.glb</code> file anywhere, or choose one above.</p>
       </section>
       <canvas id="canvas"></canvas>
       <div id="envPreviewViewport" aria-hidden="true">
