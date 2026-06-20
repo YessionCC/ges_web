@@ -1,0 +1,16 @@
+{
+  "environments": [
+    {
+      "label": "Colorful Studio",
+      "path": "./envs/colorful_studio.exr"
+    },
+    {
+      "label": "Indoor Meeting",
+      "path": "./envs/indoor_meeting.exr"
+    },
+    {
+      "label": "Outdoor Garden",
+      "path": "./envs/outdoor_garden.exr"
+    }
+  ]
+}

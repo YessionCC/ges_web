@@ -24,6 +24,7 @@ const spotConeValue = document.getElementById("spotConeValue");
 const spotSoftnessInput = document.getElementById("spotSoftness");
 const spotSoftnessValue = document.getElementById("spotSoftnessValue");
 const spotAutoInput = document.getElementById("spotAuto");
+const envPresetSelect = document.getElementById("envPresetSelect");
 const envMapInput = document.getElementById("envMapInput");
 const envDisplayModeInput = document.getElementById("envDisplayMode");
 const envIntensityInput = document.getElementById("envIntensity");
@@ -113,6 +114,7 @@ let sceneRadius = 1.0;
 let environmentTexture = null;
 let environmentSourceTexture = null;
 let environmentPmremTarget = null;
+let environmentManifest = [];
 const rgbeLoader = new RGBELoader();
 const exrLoader = new EXRLoader();
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -444,6 +446,78 @@ function disposeEnvironmentTexture() {
   scene.backgroundRotation.set(0, 0, 0);
   previewMaterial.uniforms.envTexture.value = fallbackEnvTexture;
   previewMaterial.uniforms.hasEnvTexture.value = 0;
+}
+
+function getEnvironmentLoader(lowerName) {
+  if (lowerName.endsWith(".hdr")) {
+    return rgbeLoader;
+  }
+  if (lowerName.endsWith(".exr")) {
+    return exrLoader;
+  }
+  return null;
+}
+
+function applyEnvironmentTexture(texture) {
+  disposeEnvironmentTexture();
+  environmentSourceTexture = configureEnvironmentTexture(texture);
+  environmentPmremTarget = pmremGenerator.fromEquirectangular(environmentSourceTexture);
+  environmentTexture = environmentPmremTarget.texture;
+  previewMaterial.uniforms.envTexture.value = environmentSourceTexture;
+  previewMaterial.uniforms.hasEnvTexture.value = 1;
+  syncLightingControls();
+}
+
+function setEnvPresetOptions(environments) {
+  if (!envPresetSelect) {
+    return;
+  }
+
+  envPresetSelect.innerHTML = "";
+
+  const emptyOption = document.createElement("option");
+  emptyOption.value = "";
+  emptyOption.textContent = environments.length > 0 ? "None" : "No built-in environments";
+  envPresetSelect.appendChild(emptyOption);
+
+  for (const environment of environments) {
+    const option = document.createElement("option");
+    option.value = environment.path;
+    option.textContent = environment.label;
+    envPresetSelect.appendChild(option);
+  }
+}
+
+async function loadEnvironmentManifest() {
+  if (!envPresetSelect) {
+    return;
+  }
+
+  try {
+    const response = await fetch("./envs/manifest.json", { cache: "no-store" });
+    if (!response.ok) {
+      if (response.status === 404) {
+        environmentManifest = [];
+        setEnvPresetOptions(environmentManifest);
+        return;
+      }
+      throw new Error(`Failed to load env manifest (${response.status}).`);
+    }
+
+    const manifest = await response.json();
+    const environments = Array.isArray(manifest?.environments) ? manifest.environments : [];
+    environmentManifest = environments
+      .filter((entry) => typeof entry?.path === "string" && entry.path.length > 0)
+      .map((entry) => ({
+        label: typeof entry.label === "string" && entry.label.length > 0 ? entry.label : entry.path,
+        path: entry.path,
+      }));
+    setEnvPresetOptions(environmentManifest);
+  } catch (error) {
+    environmentManifest = [];
+    setEnvPresetOptions(environmentManifest);
+    setStatus(`Environment manifest unavailable: ${error.message}`);
+  }
 }
 
 function getCubeUVParams(texture) {
@@ -1044,28 +1118,36 @@ function updateHeadlight() {
 async function loadEnvironmentMap(file) {
   setStatus(`Loading environment ${file.name} ...`);
   const buffer = await readFileWithProgress(file);
-  const lowerName = file.name.toLowerCase();
-  let texture;
-
-  if (lowerName.endsWith(".hdr")) {
-    texture = createTextureFromLoaderData(rgbeLoader.parse(buffer));
-  } else if (lowerName.endsWith(".exr")) {
-    texture = createTextureFromLoaderData(exrLoader.parse(buffer));
-  } else {
+  const loader = getEnvironmentLoader(file.name.toLowerCase());
+  if (!loader) {
     throw new Error("Unsupported environment format. Use .hdr or .exr.");
   }
-
-  disposeEnvironmentTexture();
-  environmentSourceTexture = configureEnvironmentTexture(texture);
-  environmentPmremTarget = pmremGenerator.fromEquirectangular(environmentSourceTexture);
-  environmentTexture = environmentPmremTarget.texture;
-  previewMaterial.uniforms.envTexture.value = environmentSourceTexture;
-  previewMaterial.uniforms.hasEnvTexture.value = 1;
-  syncLightingControls();
+  const texture = createTextureFromLoaderData(loader.parse(buffer));
+  applyEnvironmentTexture(texture);
   setStatus(`Loaded environment ${file.name}.`);
 }
 
+async function loadEnvironmentMapFromUrl(relativePath) {
+  const lowerName = relativePath.toLowerCase();
+  const loader = getEnvironmentLoader(lowerName);
+  if (!loader) {
+    throw new Error("Unsupported built-in environment format. Use .hdr or .exr.");
+  }
+
+  setStatus(`Loading environment ${relativePath} ...`);
+  const response = await fetch(relativePath, { cache: "force-cache" });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch environment ${relativePath} (${response.status}).`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  const texture = createTextureFromLoaderData(loader.parse(buffer));
+  applyEnvironmentTexture(texture);
+  setStatus(`Loaded environment ${relativePath}.`);
+}
+
 syncLightingControls();
+loadEnvironmentManifest().catch(() => {});
 
 function readFileWithProgress(file) {
   return new Promise((resolve, reject) => {
@@ -1242,16 +1324,38 @@ if (envDisplayModeInput) envDisplayModeInput.addEventListener("change", syncLigh
 if (envRotationYawInput) envRotationYawInput.addEventListener("input", syncLightingControls);
 if (envRotationPitchInput) envRotationPitchInput.addEventListener("input", syncLightingControls);
 if (envRotationRollInput) envRotationRollInput.addEventListener("input", syncLightingControls);
+if (envPresetSelect) {
+  envPresetSelect.addEventListener("change", () => {
+    const selectedPath = envPresetSelect.value;
+    if (!selectedPath) {
+      disposeEnvironmentTexture();
+      if (hasProductMaterials()) {
+        updateEnvironmentUniforms();
+        updateEnvironmentRotationUniform();
+      }
+      syncLightingControls();
+      setStatus("Built-in environment cleared.");
+      return;
+    }
+    loadEnvironmentMapFromUrl(selectedPath).catch((error) => setStatus(error.message));
+  });
+}
 if (envMapInput) {
   envMapInput.addEventListener("change", (event) => {
     const file = event.target.files?.[0];
     if (file) {
+      if (envPresetSelect) {
+        envPresetSelect.value = "";
+      }
       loadEnvironmentMap(file).catch((error) => setStatus(error.message));
     }
   });
 }
 if (clearEnvMapButton) {
 clearEnvMapButton.addEventListener("click", () => {
+  if (envPresetSelect) {
+    envPresetSelect.value = "";
+  }
   disposeEnvironmentTexture();
   if (hasProductMaterials()) {
     updateEnvironmentUniforms();
