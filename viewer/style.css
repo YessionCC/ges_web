@@ -31,6 +31,32 @@ body,
   height: 100%;
 }
 
+#envPreviewViewport {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 9;
+  width: min(220px, 28vw);
+  aspect-ratio: 1;
+  display: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#envPreviewLabel {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 1;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(238, 242, 239, 0.72);
+}
+
 #panel {
   position: fixed;
   left: 18px;

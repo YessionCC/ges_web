@@ -26,6 +26,7 @@ const spotSoftnessInput = document.getElementById("spotSoftness");
 const spotSoftnessValue = document.getElementById("spotSoftnessValue");
 const spotAutoInput = document.getElementById("spotAuto");
 const envMapInput = document.getElementById("envMapInput");
+const envDisplayModeInput = document.getElementById("envDisplayMode");
 const envIntensityInput = document.getElementById("envIntensity");
 const envIntensityValue = document.getElementById("envIntensityValue");
 const envRotationYawInput = document.getElementById("envRotationYaw");
@@ -35,6 +36,7 @@ const envRotationPitchValue = document.getElementById("envRotationPitchValue");
 const envRotationRollInput = document.getElementById("envRotationRoll");
 const envRotationRollValue = document.getElementById("envRotationRollValue");
 const clearEnvMapButton = document.getElementById("clearEnvMap");
+const envPreviewViewport = document.getElementById("envPreviewViewport");
 const lightingSections = document.querySelectorAll("[data-light-section]");
 
 function valueOrDefault(input, fallback) {
@@ -49,6 +51,62 @@ setStatus(`Ready. WebGL max texture size: ${renderer.capabilities.maxTextureSize
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 1000);
 camera.position.set(0, 0.35, 2.2);
+const previewScene = new THREE.Scene();
+const previewCamera = new THREE.PerspectiveCamera(32, 1, 0.01, 20);
+previewCamera.position.set(0, 0, 4.1);
+const previewMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    envTexture: { value: null },
+    hasEnvTexture: { value: 0 },
+    envRotationMatrix: { value: new THREE.Matrix3() },
+    previewViewMatrix: { value: new THREE.Matrix3() },
+  },
+  vertexShader: `
+    varying vec3 vSphereDir;
+
+    void main() {
+      vSphereDir = normalize(normal);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    precision highp float;
+    uniform sampler2D envTexture;
+    uniform int hasEnvTexture;
+    uniform mat3 envRotationMatrix;
+    uniform mat3 previewViewMatrix;
+    varying vec3 vSphereDir;
+
+    vec2 equirectUv(vec3 dir) {
+      vec3 d = normalize(dir);
+      float u = atan(d.z, d.x) / (2.0 * 3.14159265359) + 0.5;
+      float v = acos(clamp(d.y, -1.0, 1.0)) / 3.14159265359;
+      return vec2(u, v);
+    }
+
+    void main() {
+      if (hasEnvTexture == 0) {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+      }
+
+      vec3 sampleDir = normalize(envRotationMatrix * previewViewMatrix * vSphereDir);
+      vec3 color = texture2D(envTexture, equirectUv(sampleDir)).rgb;
+      color = 1.0 - exp(-color);
+      color = pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2));
+      gl_FragColor = vec4(color, 1.0);
+    }
+  `,
+});
+const previewSphere = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 64, 32),
+  previewMaterial
+);
+previewScene.add(previewSphere);
+const tempClearColor = new THREE.Color();
+const previewRight = new THREE.Vector3();
+const previewUp = new THREE.Vector3();
+const previewForward = new THREE.Vector3();
 
 let productMesh = null;
 let material = null;
@@ -63,6 +121,7 @@ pmremGenerator.compileEquirectangularShader();
 const fallbackEnvTexture = new THREE.DataTexture(new Float32Array([0, 0, 0, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
 fallbackEnvTexture.colorSpace = THREE.LinearSRGBColorSpace;
 fallbackEnvTexture.needsUpdate = true;
+previewMaterial.uniforms.envTexture.value = fallbackEnvTexture;
 
 const spotDirection = new THREE.Vector3();
 const spotPosition = new THREE.Vector3();
@@ -302,6 +361,12 @@ function resize() {
   renderer.setSize(width, height, false);
   camera.aspect = width / Math.max(height, 1);
   camera.updateProjectionMatrix();
+  if (envPreviewViewport) {
+    const previewWidth = Math.max(envPreviewViewport.clientWidth, 1);
+    const previewHeight = Math.max(envPreviewViewport.clientHeight, 1);
+    previewCamera.aspect = previewWidth / previewHeight;
+    previewCamera.updateProjectionMatrix();
+  }
 }
 
 window.addEventListener("resize", resize);
@@ -449,6 +514,8 @@ function disposeEnvironmentTexture() {
   scene.backgroundIntensity = 1;
   scene.backgroundBlurriness = 0;
   scene.backgroundRotation.set(0, 0, 0);
+  previewMaterial.uniforms.envTexture.value = fallbackEnvTexture;
+  previewMaterial.uniforms.hasEnvTexture.value = 0;
 }
 
 function getCubeUVParams(texture) {
@@ -477,6 +544,7 @@ function updateEnvironmentUniforms() {
 
 function updateEnvironmentRotationUniform() {
   if (!material) {
+    updateEnvPreview();
     return;
   }
   const yaw = THREE.MathUtils.degToRad(valueOrDefault(envRotationYawInput, 0));
@@ -484,6 +552,48 @@ function updateEnvironmentRotationUniform() {
   const roll = THREE.MathUtils.degToRad(valueOrDefault(envRotationRollInput, 0));
   const matrix = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(pitch, yaw, roll, "YXZ")).invert();
   material.uniforms.envRotationMatrix.value.setFromMatrix4(matrix);
+  updateEnvPreview();
+}
+
+function getEnvDisplayMode() {
+  return valueOrDefault(envDisplayModeInput, 0);
+}
+
+function shouldShowEnvPreview() {
+  return Boolean(environmentSourceTexture && valueOrDefault(lightingModeInput, 0) === 2 && getEnvDisplayMode() === 1);
+}
+
+function updateEnvPreview() {
+  if (!envPreviewViewport) {
+    return;
+  }
+
+  const visible = shouldShowEnvPreview();
+  envPreviewViewport.style.display = visible ? "block" : "none";
+
+  if (!visible) {
+    return;
+  }
+
+  const yaw = THREE.MathUtils.degToRad(valueOrDefault(envRotationYawInput, 0));
+  const pitch = THREE.MathUtils.degToRad(valueOrDefault(envRotationPitchInput, 0));
+  const roll = THREE.MathUtils.degToRad(valueOrDefault(envRotationRollInput, 0));
+  const matrix = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(pitch, yaw, roll, "YXZ"));
+  previewMaterial.uniforms.envTexture.value = environmentSourceTexture || fallbackEnvTexture;
+  previewMaterial.uniforms.hasEnvTexture.value = environmentSourceTexture ? 1 : 0;
+  previewMaterial.uniforms.envRotationMatrix.value.setFromMatrix4(matrix);
+}
+
+function updateEnvPreviewViewMatrix() {
+  previewRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  previewUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  previewForward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+
+  previewMaterial.uniforms.previewViewMatrix.value.set(
+    previewRight.x, previewUp.x, previewForward.x,
+    previewRight.y, previewUp.y, previewForward.y,
+    previewRight.z, previewUp.z, previewForward.z
+  );
 }
 
 function getSpotDirection() {
@@ -547,22 +657,10 @@ function syncLightingControls() {
   if (envRotationRollValue) envRotationRollValue.textContent = `${valueOrDefault(envRotationRollInput, 0).toFixed(0)}°`;
   updateLightingUi();
 
-  if (!material) {
-    return;
-  }
-
-  material.uniforms.lightingMode.value = valueOrDefault(lightingModeInput, 0);
-  material.uniforms.lightIntensity.value = valueOrDefault(lightIntensityInput, 1.4);
-  material.uniforms.headlightRange.value = valueOrDefault(headlightRangeInput, 0.75);
-  material.uniforms.envIntensity.value = valueOrDefault(envIntensityInput, 1);
-  updateEnvironmentRotationUniform();
-  updateEnvironmentUniforms();
-
-  updateSpotlightFromState();
-
   const lightingMode = valueOrDefault(lightingModeInput, 0);
+  const envDisplayMode = getEnvDisplayMode();
 
-  if (environmentTexture && lightingMode === 2) {
+  if (environmentTexture && lightingMode === 2 && envDisplayMode === 0) {
     scene.background = environmentTexture;
     scene.backgroundIntensity = valueOrDefault(envIntensityInput, 1);
     scene.backgroundBlurriness = 0;
@@ -578,6 +676,21 @@ function syncLightingControls() {
     scene.backgroundBlurriness = 0;
     scene.backgroundRotation.set(0, 0, 0);
   }
+
+  updateEnvPreview();
+
+  if (!material) {
+    return;
+  }
+
+  material.uniforms.lightingMode.value = valueOrDefault(lightingModeInput, 0);
+  material.uniforms.lightIntensity.value = valueOrDefault(lightIntensityInput, 1.4);
+  material.uniforms.headlightRange.value = valueOrDefault(headlightRangeInput, 0.75);
+  material.uniforms.envIntensity.value = valueOrDefault(envIntensityInput, 1);
+  updateEnvironmentRotationUniform();
+  updateEnvironmentUniforms();
+
+  updateSpotlightFromState();
 }
 
 function updateAutoSpotlight(timeMs) {
@@ -1004,6 +1117,8 @@ async function loadEnvironmentMap(file) {
   environmentSourceTexture = configureEnvironmentTexture(texture);
   environmentPmremTarget = pmremGenerator.fromEquirectangular(environmentSourceTexture);
   environmentTexture = environmentPmremTarget.texture;
+  previewMaterial.uniforms.envTexture.value = environmentSourceTexture;
+  previewMaterial.uniforms.hasEnvTexture.value = 1;
   syncLightingControls();
   setStatus(`Loaded environment ${file.name}.`);
 }
@@ -1159,6 +1274,7 @@ if (spotAutoInput) {
   });
 }
 if (envIntensityInput) envIntensityInput.addEventListener("input", syncLightingControls);
+if (envDisplayModeInput) envDisplayModeInput.addEventListener("change", syncLightingControls);
 if (envRotationYawInput) envRotationYawInput.addEventListener("input", syncLightingControls);
 if (envRotationPitchInput) envRotationPitchInput.addEventListener("input", syncLightingControls);
 if (envRotationRollInput) envRotationRollInput.addEventListener("input", syncLightingControls);
@@ -1200,10 +1316,43 @@ function animate(timeMs = 0) {
   updateAutoSpotlight(timeMs);
   updateHeadlight();
   updateSpotlightFromState();
+  renderer.setScissorTest(false);
   renderer.render(scene, camera);
+  renderEnvPreview();
 }
 
 animate();
+
+function renderEnvPreview() {
+  if (!shouldShowEnvPreview() || !envPreviewViewport) {
+    return;
+  }
+
+  const rect = envPreviewViewport.getBoundingClientRect();
+  const width = Math.max(Math.round(rect.width), 1);
+  const height = Math.max(Math.round(rect.height), 1);
+  const left = Math.round(rect.left);
+  const bottom = Math.round(window.innerHeight - rect.bottom);
+
+  previewCamera.aspect = width / height;
+  previewCamera.updateProjectionMatrix();
+  updateEnvPreviewViewMatrix();
+
+  renderer.autoClear = false;
+  renderer.setViewport(left, bottom, width, height);
+  renderer.setScissor(left, bottom, width, height);
+  renderer.setScissorTest(true);
+  renderer.getClearColor(tempClearColor);
+  const previousClearAlpha = renderer.getClearAlpha();
+  renderer.setClearColor(0x000000, 1);
+  renderer.clearDepth();
+  renderer.clear(true, true, true);
+  renderer.render(previewScene, previewCamera);
+  renderer.setClearColor(tempClearColor, previousClearAlpha);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
+  renderer.autoClear = true;
+}
 
 window.addEventListener("error", (event) => {
   setStatus(`Viewer error: ${event.message}`);

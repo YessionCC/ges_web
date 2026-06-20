@@ -79,6 +79,13 @@
             <span>Upload HDR / EXR environment</span>
           </label>
           <label>
+            Env display
+            <select id="envDisplayMode">
+              <option value="0" selected>Mode 1: full background</option>
+              <option value="1">Mode 2: preview sphere</option>
+            </select>
+          </label>
+          <label>
             Env intensity <span id="envIntensityValue">1.00</span>
             <input id="envIntensity" type="range" min="0" max="4" step="0.05" value="1" />
           </label>
@@ -99,6 +106,9 @@
         <p id="status">Drop a <code>result.bin</code> file anywhere, or choose one above.</p>
       </section>
       <canvas id="canvas"></canvas>
+      <div id="envPreviewViewport" aria-hidden="true">
+        <div id="envPreviewLabel">Env Preview</div>
+      </div>
     </main>
     <script>
       window.addEventListener("dragover", function (event) {
