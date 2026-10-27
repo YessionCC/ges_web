@@ -9,12 +9,19 @@
   <body>
     <main id="app">
       <section id="panel">
-        <h1>Guobo Product Viewer</h1>
+        <div class="panel-header">
+          <h1>Guobo Product Viewer</h1>
+          <button id="panelToggle" type="button" title="Collapse panel (H)" aria-expanded="true">‹</button>
+        </div>
         <label class="file">
           <input id="fileInput" type="file" accept=".glb,model/gltf-binary" multiple />
           <span>Open product .glb</span>
         </label>
         <button id="compareToggle" type="button" aria-pressed="false">Compare: off</button>
+        <div id="compareTools" class="button-row">
+          <button id="alignModels" type="button" title="Similarity-align (scale / rotation / translation) models 2-4 onto model 1">Align to #1</button>
+          <button id="resetAlignment" type="button">Reset align</button>
+        </div>
         <label>
           Material
           <select id="modeSelect">

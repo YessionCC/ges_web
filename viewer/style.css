@@ -123,9 +123,52 @@ body,
   box-shadow: 0 20px 70px rgba(0, 0, 0, 0.38);
 }
 
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+#panelToggle {
+  flex: none;
+  margin: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+#panel.collapsed {
+  width: auto;
+  padding: 8px;
+}
+
+#panel.collapsed > :not(.panel-header),
+#panel.collapsed h1 {
+  display: none !important;
+}
+
+#panel.collapsed .panel-header {
+  margin-bottom: 0;
+}
+
+.button-row {
+  display: none;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.button-row.visible {
+  display: grid;
+}
+
 h1 {
-  margin: 0 0 14px;
-  font-size: 22px;
+  margin: 0;
+  font-size: 20px;
+  white-space: nowrap;
   letter-spacing: 0.02em;
 }
 

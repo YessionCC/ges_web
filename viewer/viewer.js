@@ -2,6 +2,7 @@ import * as THREE from "./vendor/three.module.js";
 import { GLTFLoader } from "./vendor/GLTFLoader.js";
 import { RGBELoader } from "./vendor/RGBELoader.js";
 import { EXRLoader } from "./vendor/EXRLoader.js";
+import { sampleSurfacePoints, alignPointSets } from "./align.js";
 
 const canvas = document.getElementById("canvas");
 const statusEl = document.getElementById("status");
@@ -40,6 +41,11 @@ const envPreviewViewport = document.getElementById("envPreviewViewport");
 const lightingSections = document.querySelectorAll("[data-light-section]");
 const compareToggleButton = document.getElementById("compareToggle");
 const viewportOverlay = document.getElementById("viewportOverlay");
+const panel = document.getElementById("panel");
+const panelToggleButton = document.getElementById("panelToggle");
+const compareTools = document.getElementById("compareTools");
+const alignModelsButton = document.getElementById("alignModels");
+const resetAlignmentButton = document.getElementById("resetAlignment");
 const MAX_COMPARE_MODELS = 4;
 
 function valueOrDefault(input, fallback) {
@@ -112,7 +118,7 @@ const previewRight = new THREE.Vector3();
 const previewUp = new THREE.Vector3();
 const previewForward = new THREE.Vector3();
 
-// Loaded products, one per viewport in compare mode: { root, materials, name }.
+// Loaded products, one per viewport in compare mode: { root, materials, name, baseMatrix }.
 let products = [];
 let productMaterials = [];
 let compareMode = false;
@@ -575,6 +581,44 @@ function setProducts(nextProducts) {
   products = nextProducts;
   productMaterials = products.flatMap((product) => product.materials);
   updateViewportOverlay();
+  updateCompareTools();
+}
+
+function updateCompareTools() {
+  compareTools?.classList.toggle("visible", compareMode && products.length >= 2);
+}
+
+function setProductMatrix(product, matrix) {
+  product.root.matrix.copy(matrix);
+  product.root.matrix.decompose(product.root.position, product.root.quaternion, product.root.scale);
+  product.root.updateMatrixWorld(true);
+}
+
+// Similarity-aligns models 2-4 onto model 1 from their as-loaded poses; the camera stays put.
+async function alignProductsToFirst() {
+  if (products.length < 2) {
+    return;
+  }
+  const reference = products[0];
+  setStatus("Aligning: sampling reference surface ...");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const targetPoints = sampleSurfacePoints(reference.root, undefined, 2);
+  const results = [];
+  for (let i = 1; i < products.length; i += 1) {
+    const product = products[i];
+    setStatus(`Aligning ${product.name} (${i}/${products.length - 1}) ...`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    setProductMatrix(product, product.baseMatrix);
+    const { matrix, scale, relativeError } = alignPointSets(sampleSurfacePoints(product.root, undefined, 1), targetPoints);
+    setProductMatrix(product, matrix.multiply(product.baseMatrix));
+    results.push(`#${i + 1} s=${scale.toPrecision(4)} err=${(relativeError * 100).toFixed(2)}%`);
+  }
+  setStatus(`Aligned to #1 (${reference.name}): ${results.join(", ")}. Error is trimmed chamfer / model radius.`);
+}
+
+function resetProductAlignment() {
+  products.forEach((product) => setProductMatrix(product, product.baseMatrix));
+  setStatus("Alignment reset to the as-loaded poses.");
 }
 
 function clearProductScene() {
@@ -661,6 +705,7 @@ function setCompareMode(enabled) {
     setProducts(products.slice(0, 1));
   }
   updateViewportOverlay();
+  updateCompareTools();
   setStatus(
     enabled
       ? `Compare mode on: drop up to ${MAX_COMPARE_MODELS} .glb files to view side by side.`
@@ -1387,7 +1432,8 @@ async function loadGlb(buffer, fileName) {
   }
 
   originalMaterials.forEach((sourceMaterial) => sourceMaterial?.dispose?.());
-  const product = { root: gltf.scene, materials: Array.from(materialCache.values()), name: fileName };
+  gltf.scene.updateMatrix();
+  const product = { root: gltf.scene, materials: Array.from(materialCache.values()), name: fileName, baseMatrix: gltf.scene.matrix.clone() };
   if (isCompareFull()) {
     disposeProduct(product);
     throw new Error(`Compare mode shows at most ${MAX_COMPARE_MODELS} models; remove one first.`);
@@ -1438,6 +1484,34 @@ fileInput.addEventListener("change", (event) => {
 if (compareToggleButton) {
   compareToggleButton.addEventListener("click", () => setCompareMode(!compareMode));
 }
+if (alignModelsButton) {
+  alignModelsButton.addEventListener("click", () => {
+    alignProductsToFirst().catch((error) => setStatus(`Alignment failed: ${error.message}`));
+  });
+}
+if (resetAlignmentButton) {
+  resetAlignmentButton.addEventListener("click", resetProductAlignment);
+}
+
+function setPanelCollapsed(collapsed) {
+  panel?.classList.toggle("collapsed", collapsed);
+  if (panelToggleButton) {
+    panelToggleButton.textContent = collapsed ? "›" : "‹";
+    panelToggleButton.title = collapsed ? "Expand panel (H)" : "Collapse panel (H)";
+    panelToggleButton.setAttribute("aria-expanded", String(!collapsed));
+  }
+}
+
+if (panelToggleButton) {
+  panelToggleButton.addEventListener("click", () => setPanelCollapsed(!panel.classList.contains("collapsed")));
+}
+window.addEventListener("keydown", (event) => {
+  const tag = event.target?.tagName;
+  if (event.key.toLowerCase() !== "h" || event.ctrlKey || event.metaKey || event.altKey || tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+    return;
+  }
+  setPanelCollapsed(!panel.classList.contains("collapsed"));
+});
 
 modeSelect.addEventListener("change", () => {
   forEachProductMaterial((productMaterial) => {
