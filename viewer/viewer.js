@@ -38,6 +38,9 @@ const envRotationRollValue = document.getElementById("envRotationRollValue");
 const clearEnvMapButton = document.getElementById("clearEnvMap");
 const envPreviewViewport = document.getElementById("envPreviewViewport");
 const lightingSections = document.querySelectorAll("[data-light-section]");
+const compareToggleButton = document.getElementById("compareToggle");
+const viewportOverlay = document.getElementById("viewportOverlay");
+const MAX_COMPARE_MODELS = 4;
 
 function valueOrDefault(input, fallback) {
   return input ? Number(input.value) : fallback;
@@ -49,7 +52,8 @@ renderer.setClearColor(0x07090a, 1);
 setStatus(`Ready. WebGL max texture size: ${renderer.capabilities.maxTextureSize}.`);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, 1, 0.001, 1000);
+const BASE_FOV = 45;
+const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.001, 1000);
 camera.position.set(0, 0.35, 2.2);
 const previewScene = new THREE.Scene();
 const previewCamera = new THREE.PerspectiveCamera(32, 1, 0.01, 20);
@@ -108,8 +112,11 @@ const previewRight = new THREE.Vector3();
 const previewUp = new THREE.Vector3();
 const previewForward = new THREE.Vector3();
 
-let productRoot = null;
+// Loaded products, one per viewport in compare mode: { root, materials, name }.
+let products = [];
 let productMaterials = [];
+let compareMode = false;
+let overlayLayoutKey = "";
 let sceneRadius = 1.0;
 let environmentTexture = null;
 let environmentSourceTexture = null;
@@ -151,6 +158,8 @@ class QuaternionOrbitController {
     this.zoomSpeed = 0.0002;
     this.dampingFactor = 0.12;
     this.enableDamping = true;
+    this.getViewportRect = null;
+    this._dragRect = null;
 
     this.state = {
       dragging: false,
@@ -190,6 +199,7 @@ class QuaternionOrbitController {
     this.state.button = event.button;
     this.state.lastX = event.clientX;
     this.state.lastY = event.clientY;
+    this._dragRect = this.getViewportRect ? this.getViewportRect(event.clientX, event.clientY) : null;
     if (event.button === 0) {
       this._arcballLast = this._projectArcball(event.clientX, event.clientY);
     }
@@ -222,6 +232,7 @@ class QuaternionOrbitController {
     this.state.dragging = false;
     this.state.button = -1;
     this._arcballLast = null;
+    this._dragRect = null;
   };
 
   _onWheel = (event) => {
@@ -278,7 +289,7 @@ class QuaternionOrbitController {
   }
 
   _projectArcball(clientX, clientY) {
-    const rect = this.domElement.getBoundingClientRect();
+    const rect = this._dragRect || this.domElement.getBoundingClientRect();
     const size = Math.max(Math.min(rect.width, rect.height), 1);
     const x = ((clientX - rect.left) / size) * 2 - rect.width / size;
     const y = rect.height / size - ((clientY - rect.top) / size) * 2;
@@ -351,6 +362,16 @@ class QuaternionOrbitController {
 }
 
 const controls = new QuaternionOrbitController(camera, renderer.domElement);
+controls.getViewportRect = (clientX, clientY) => {
+  const canvasRect = renderer.domElement.getBoundingClientRect();
+  const x = clientX - canvasRect.left;
+  const y = clientY - canvasRect.top;
+  const viewport = getViewportLayout().find((vp) => x >= vp.x && x < vp.x + vp.width && y >= vp.y && y < vp.y + vp.height);
+  if (!viewport) {
+    return null;
+  }
+  return { left: canvasRect.left + viewport.x, top: canvasRect.top + viewport.y, width: viewport.width, height: viewport.height };
+};
 
 function setStatus(message) {
   statusEl.textContent = message;
@@ -360,8 +381,7 @@ function resize() {
   const width = window.innerWidth;
   const height = window.innerHeight;
   renderer.setSize(width, height, false);
-  camera.aspect = width / Math.max(height, 1);
-  camera.updateProjectionMatrix();
+  updateViewportOverlay();
   if (envPreviewViewport) {
     const previewWidth = Math.max(envPreviewViewport.clientWidth, 1);
     const previewHeight = Math.max(envPreviewViewport.clientHeight, 1);
@@ -541,18 +561,111 @@ function forEachProductMaterial(callback) {
   }
 }
 
+function disposeProduct(product) {
+  scene.remove(product.root);
+  product.root.traverse((object) => {
+    if (object.isMesh) {
+      object.geometry?.dispose();
+    }
+  });
+  product.materials.forEach((productMaterial) => productMaterial.dispose());
+}
+
+function setProducts(nextProducts) {
+  products = nextProducts;
+  productMaterials = products.flatMap((product) => product.materials);
+  updateViewportOverlay();
+}
+
 function clearProductScene() {
-  if (productRoot) {
-    scene.remove(productRoot);
-    productRoot.traverse((object) => {
-      if (object.isMesh) {
-        object.geometry?.dispose();
-      }
-    });
-    productRoot = null;
+  products.forEach(disposeProduct);
+  setProducts([]);
+}
+
+function removeProduct(index) {
+  const product = products[index];
+  if (!product) {
+    return;
   }
-  forEachProductMaterial((productMaterial) => productMaterial.dispose());
-  productMaterials = [];
+  disposeProduct(product);
+  setProducts(products.filter((_, i) => i !== index));
+  setStatus(`Removed ${product.name} from comparison.`);
+}
+
+// Viewport rects in CSS pixels, top-left origin: 1 full, 2/3 side by side, 4 as 2x2.
+function getViewportLayout() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const count = compareMode ? Math.max(products.length, 1) : 1;
+  const cols = count === 4 ? 2 : count;
+  const rows = count === 4 ? 2 : 1;
+  const viewports = [];
+  for (let i = 0; i < count; i += 1) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x0 = Math.round((col * width) / cols);
+    const x1 = Math.round(((col + 1) * width) / cols);
+    const y0 = Math.round((row * height) / rows);
+    const y1 = Math.round(((row + 1) * height) / rows);
+    viewports.push({ x: x0, y: y0, width: Math.max(x1 - x0, 1), height: Math.max(y1 - y0, 1) });
+  }
+  return viewports;
+}
+
+function updateViewportOverlay() {
+  if (!viewportOverlay) {
+    return;
+  }
+  const viewports = compareMode ? getViewportLayout() : [];
+  const key = JSON.stringify([viewports, products.map((product) => product.name)]);
+  if (key === overlayLayoutKey) {
+    return;
+  }
+  overlayLayoutKey = key;
+  viewportOverlay.innerHTML = "";
+  viewports.forEach((viewport, index) => {
+    const frame = document.createElement("div");
+    frame.className = "viewport-frame";
+    frame.style.left = `${viewport.x}px`;
+    frame.style.top = `${viewport.y}px`;
+    frame.style.width = `${viewport.width}px`;
+    frame.style.height = `${viewport.height}px`;
+    const product = products[index];
+    if (product) {
+      const label = document.createElement("div");
+      label.className = "viewport-label";
+      const name = document.createElement("span");
+      name.textContent = `${index + 1}. ${product.name}`;
+      name.title = product.name;
+      const close = document.createElement("button");
+      close.type = "button";
+      close.textContent = "×";
+      close.title = "Remove from comparison";
+      close.addEventListener("click", () => removeProduct(index));
+      label.append(name, close);
+      frame.appendChild(label);
+    }
+    viewportOverlay.appendChild(frame);
+  });
+}
+
+function setCompareMode(enabled) {
+  compareMode = enabled;
+  if (compareToggleButton) {
+    compareToggleButton.textContent = enabled ? "Compare: on" : "Compare: off";
+    compareToggleButton.classList.toggle("active", enabled);
+    compareToggleButton.setAttribute("aria-pressed", String(enabled));
+  }
+  if (!enabled && products.length > 1) {
+    products.slice(1).forEach(disposeProduct);
+    setProducts(products.slice(0, 1));
+  }
+  updateViewportOverlay();
+  setStatus(
+    enabled
+      ? `Compare mode on: drop up to ${MAX_COMPARE_MODELS} .glb files to view side by side.`
+      : "Compare mode off."
+  );
 }
 
 function updateEnvironmentUniforms() {
@@ -1149,6 +1262,10 @@ async function loadEnvironmentMapFromUrl(relativePath) {
 syncLightingControls();
 loadEnvironmentManifest().catch(() => {});
 
+function isCompareFull() {
+  return compareMode && products.length >= MAX_COMPARE_MODELS;
+}
+
 function readFileWithProgress(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1167,6 +1284,9 @@ function readFileWithProgress(file) {
 }
 
 async function loadFile(file) {
+  if (isCompareFull()) {
+    throw new Error(`Compare mode shows at most ${MAX_COMPARE_MODELS} models; remove one first.`);
+  }
   setStatus(`Loading ${file.name} ...`);
   await new Promise((resolve) => setTimeout(resolve, 20));
   const buffer = await readFileWithProgress(file);
@@ -1266,29 +1386,58 @@ async function loadGlb(buffer, fileName) {
     }
   }
 
-  clearProductScene();
-  productRoot = gltf.scene;
-  productMaterials = Array.from(materialCache.values());
-  scene.add(productRoot);
   originalMaterials.forEach((sourceMaterial) => sourceMaterial?.dispose?.());
+  const product = { root: gltf.scene, materials: Array.from(materialCache.values()), name: fileName };
+  if (isCompareFull()) {
+    disposeProduct(product);
+    throw new Error(`Compare mode shows at most ${MAX_COMPARE_MODELS} models; remove one first.`);
+  }
+  scene.add(product.root);
 
-  frameProductScene(productRoot);
+  // In compare mode, extra models keep the shared camera pose instead of reframing.
+  const appendToCompare = compareMode && products.length > 0;
+  if (appendToCompare) {
+    setProducts([...products, product]);
+  } else {
+    clearProductScene();
+    setProducts([product]);
+    frameProductScene(product.root);
+  }
   updateEnvironmentUniforms();
   updateEnvironmentRotationUniform();
   syncLightingControls();
   const firstMetadata = productMetadataList[0];
   const stepLabel = firstMetadata?.step != null ? `step ${firstMetadata.step}, ` : "";
+  const compareLabel = compareMode ? ` [${products.length}/${MAX_COMPARE_MODELS} in compare]` : "";
   setStatus(
-    `Loaded GLB ${stepLabel}${faceCount.toLocaleString()} faces across ${primitiveCount} primitives and ${productMaterials.length} materials.`
+    `Loaded GLB ${stepLabel}${faceCount.toLocaleString()} faces across ${primitiveCount} primitives and ${product.materials.length} materials.${compareLabel}`
   );
 }
 
-fileInput.addEventListener("change", (event) => {
-  const file = event.target.files?.[0];
-  if (file) {
-    loadFile(file).catch((error) => setStatus(error.message));
+// Single mode loads the first file; compare mode loads files in order until all slots are used.
+async function loadFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (files.length === 0) {
+    return;
   }
+  const queue = compareMode ? files : files.slice(0, 1);
+  for (const file of queue) {
+    if (products.length > 0 && isCompareFull()) {
+      setStatus(`Compare mode shows at most ${MAX_COMPARE_MODELS} models; skipped remaining files.`);
+      return;
+    }
+    await loadFile(file);
+  }
+}
+
+fileInput.addEventListener("change", (event) => {
+  loadFiles(event.target.files).catch((error) => setStatus(error.message));
+  event.target.value = "";
 });
+
+if (compareToggleButton) {
+  compareToggleButton.addEventListener("click", () => setCompareMode(!compareMode));
+}
 
 modeSelect.addEventListener("change", () => {
   forEachProductMaterial((productMaterial) => {
@@ -1372,10 +1521,7 @@ window.addEventListener("dragover", (event) => {
 
 window.addEventListener("drop", (event) => {
   event.preventDefault();
-  const file = event.dataTransfer?.files?.[0];
-  if (file) {
-    loadFile(file).catch((error) => setStatus(error.message));
-  }
+  loadFiles(event.dataTransfer?.files).catch((error) => setStatus(error.message));
 });
 
 function animate(timeMs = 0) {
@@ -1384,9 +1530,32 @@ function animate(timeMs = 0) {
   updateAutoSpotlight(timeMs);
   updateHeadlight();
   updateSpotlightFromState();
-  renderer.setScissorTest(false);
-  renderer.render(scene, camera);
+  renderProductViewports();
   renderEnvPreview();
+}
+
+// Every viewport shares one camera pose; viewport i shows only product i.
+function renderProductViewports() {
+  const viewports = getViewportLayout();
+  const canvasHeight = window.innerHeight;
+  renderer.setScissorTest(true);
+  viewports.forEach((viewport, index) => {
+    products.forEach((product, productIndex) => {
+      product.root.visible = productIndex === index;
+    });
+    const bottom = canvasHeight - viewport.y - viewport.height;
+    renderer.setViewport(viewport.x, bottom, viewport.width, viewport.height);
+    renderer.setScissor(viewport.x, bottom, viewport.width, viewport.height);
+    camera.aspect = viewport.width / viewport.height;
+    // Narrow compare viewports keep the base FOV horizontally so the object is not cropped.
+    camera.fov = compareMode && camera.aspect < 1
+      ? THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(BASE_FOV) / 2) / camera.aspect))
+      : BASE_FOV;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
+  });
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, window.innerWidth, canvasHeight);
 }
 
 animate();

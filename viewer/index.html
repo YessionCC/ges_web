@@ -11,9 +11,10 @@
       <section id="panel">
         <h1>Guobo Product Viewer</h1>
         <label class="file">
-          <input id="fileInput" type="file" accept=".glb,model/gltf-binary" />
+          <input id="fileInput" type="file" accept=".glb,model/gltf-binary" multiple />
           <span>Open product .glb</span>
         </label>
+        <button id="compareToggle" type="button" aria-pressed="false">Compare: off</button>
         <label>
           Material
           <select id="modeSelect">
@@ -112,6 +113,7 @@
         <p id="status">Drop a <code>.glb</code> file anywhere, or choose one above.</p>
       </section>
       <canvas id="canvas"></canvas>
+      <div id="viewportOverlay"></div>
       <div id="envPreviewViewport" aria-hidden="true">
         <div id="envPreviewLabel">Env Preview</div>
       </div>

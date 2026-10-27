@@ -31,6 +31,58 @@ body,
   height: 100%;
 }
 
+#viewportOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.viewport-frame {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.viewport-label {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  max-width: 55%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.viewport-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewport-label button {
+  margin: 0;
+  padding: 0 7px;
+  border-radius: 999px;
+  line-height: 18px;
+  pointer-events: auto;
+}
+
+#compareToggle {
+  width: 100%;
+}
+
+#compareToggle.active {
+  color: #15130d;
+  background: linear-gradient(135deg, #f1d591, var(--accent));
+  font-weight: 700;
+}
+
 #envPreviewViewport {
   position: fixed;
   top: 18px;
