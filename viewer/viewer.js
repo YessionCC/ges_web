@@ -9,6 +9,8 @@ const statusEl = document.getElementById("status");
 const fileInput = document.getElementById("fileInput");
 const modeSelect = document.getElementById("modeSelect");
 const flipVInput = document.getElementById("flipV");
+const beckmannDistInput = document.getElementById("beckmannDist");
+const fresnelPsF0Input = document.getElementById("fresnelPsF0");
 const lightingModeInput = document.getElementById("lightingMode");
 const lightIntensityInput = document.getElementById("lightIntensity");
 const lightIntensityValue = document.getElementById("lightIntensityValue");
@@ -917,6 +919,8 @@ function createProductMaterial(textures, metadata) {
       tangentTex: { value: prepareProductTexture(textures.tangent) },
       mode: { value: Number(modeSelect.value) },
       flipV: { value: flipVInput.checked ? 1 : 0 },
+      specDist: { value: beckmannDistInput.checked ? 1 : 0 },
+      fresnelMode: { value: fresnelPsF0Input.checked ? 1 : 0 },
       psRange: { value: psRange },
       axayMin: { value: axRange[0] },
       axayMax: { value: axRange[1] },
@@ -966,6 +970,8 @@ function createProductMaterial(textures, metadata) {
       uniform sampler2D tangentTex;
       uniform int mode;
       uniform int flipV;
+      uniform int specDist;
+      uniform int fresnelMode;
       uniform float psRange;
       uniform float axayMin;
       uniform float axayMax;
@@ -1019,6 +1025,34 @@ function createProductMaterial(textures, metadata) {
         float d = 1.0 / (3.14159265359 * ax * ay * len2 * len2 + 1e-6);
         float g = ggxG1Aniso(wi, ax, ay) * ggxG1Aniso(wo, ax, ay);
         return d * fresnel * g / (4.0 * wi.z * wo.z + 1e-6);
+      }
+
+      // Experimental switches (default off = original GGX, ps * F(F0 = 0.04)).
+      // specDist 1: Beckmann D (same ax/ay, lighter tails). fresnelMode 1: ps is the coloured Schlick F0 (ps / psRange).
+      vec3 specularTerm(vec3 wi, vec3 wo, float ax, float ay, vec3 ps) {
+        if (wi.z <= 0.0 || wo.z <= 0.0) {
+          return vec3(0.0);
+        }
+        vec3 h = normalize(wi + wo);
+        float wiDotH = clamp(dot(wi, h), 0.0, 1.0);
+        float d;
+        if (specDist == 1) {
+          float hz = max(h.z, 1e-4);
+          float q = (h.x / ax) * (h.x / ax) + (h.y / ay) * (h.y / ay);
+          d = exp(-min(q / (hz * hz), 60.0)) / (3.14159265359 * ax * ay * hz * hz * hz * hz + 1e-6);
+        } else {
+          vec3 hScaled = h / vec3(ax + 1e-6, ay + 1e-6, 1.0);
+          float len2 = dot(hScaled, hScaled);
+          d = 1.0 / (3.14159265359 * ax * ay * len2 * len2 + 1e-6);
+        }
+        float g = ggxG1Aniso(wi, ax, ay) * ggxG1Aniso(wo, ax, ay);
+        float dg = d * g / (4.0 * wi.z * wo.z + 1e-6);
+        float schlick = pow(clamp(1.0 - wiDotH, 0.0, 1.0), 5.0);
+        if (fresnelMode == 1) {
+          vec3 f0 = clamp(ps / max(psRange, 1e-6), 0.0, 1.0);
+          return dg * (f0 + (1.0 - f0) * schlick);
+        }
+        return ps * dg * (0.04 + 0.96 * schlick);
       }
 
       float saturate(float value) {
@@ -1195,8 +1229,7 @@ function createProductMaterial(textures, metadata) {
           wo = worldToLocal * worldViewDir;
         }
         float ndl = max(wi.z, 0.0);
-        float brdfSpec = ggxAniso(wi, wo, max(axay.x, 0.006), max(axay.y, 0.006));
-        vec3 brdf = pd / 3.14159265359 + ps * brdfSpec;
+        vec3 brdf = pd / 3.14159265359 + specularTerm(wi, wo, max(axay.x, 0.006), max(axay.y, 0.006), ps);
         vec3 color = pd * 0.04;
 
         if (lightingMode == 0) {
@@ -1220,16 +1253,15 @@ function createProductMaterial(textures, metadata) {
           float edge1 = mix(spotConeCos, 1.0, 1.0 - spotSoftness);
           float cone = smoothstep(edge0, max(edge1, edge0 + 1e-4), coneCos);
           float attenuation = cone / (1.0 + distanceToLight * distanceToLight / max(sceneRadius * sceneRadius, 1e-4));
-          float spec = ggxAniso(wi, wo, max(axay.x, 0.006), max(axay.y, 0.006));
-          color += (pd / 3.14159265359 + ps * spec) * ndl * lightIntensity * attenuation;
+          color += (pd / 3.14159265359 + specularTerm(wi, wo, max(axay.x, 0.006), max(axay.y, 0.006), ps)) * ndl * lightIntensity * attenuation;
         } else if (hasEnvMap == 1) {
           vec3 worldNormal = normalize(n);
           vec3 viewDir = worldViewDir;
           float roughness = clamp(sqrt(max(axay.x * axay.y, 0.0001)), 0.04, 1.0);
           vec3 irradiance = sampleEnvIrradiance(worldNormal) * envIntensity;
           vec3 radiance = sampleEnvRadiance(viewDir, worldNormal, roughness) * envIntensity;
-          vec3 specularColor = ps * 0.04;
-          vec3 specularF90 = ps;
+          vec3 specularColor = fresnelMode == 1 ? clamp(ps / max(psRange, 1e-6), 0.0, 1.0) : ps * 0.04;
+          vec3 specularF90 = fresnelMode == 1 ? vec3(1.0) : ps;
           color += irradiance * (pd / 3.14159265359);
           color += radiance * environmentBRDF(worldNormal, viewDir, specularColor, specularF90, roughness);
         }
@@ -1516,6 +1548,18 @@ window.addEventListener("keydown", (event) => {
 modeSelect.addEventListener("change", () => {
   forEachProductMaterial((productMaterial) => {
     productMaterial.uniforms.mode.value = Number(modeSelect.value);
+  });
+});
+
+beckmannDistInput.addEventListener("change", () => {
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.specDist.value = beckmannDistInput.checked ? 1 : 0;
+  });
+});
+
+fresnelPsF0Input.addEventListener("change", () => {
+  forEachProductMaterial((productMaterial) => {
+    productMaterial.uniforms.fresnelMode.value = fresnelPsF0Input.checked ? 1 : 0;
   });
 });
 

@@ -39,6 +39,14 @@
           <input id="flipV" type="checkbox" checked />
           Flip texture V
         </label>
+        <label class="row" title="Experimental: Beckmann microfacet distribution instead of GGX (same ax/ay)">
+          <input id="beckmannDist" type="checkbox" />
+          Beckmann distribution (exp.)
+        </label>
+        <label class="row" title="Experimental: ps is the coloured Schlick F0 (F0 = ps / ps range) instead of ps x F(F0 = 0.04). Only for GLBs trained that way.">
+          <input id="fresnelPsF0" type="checkbox" />
+          ps as F0 (exp.)
+        </label>
         <label>
           Lighting
           <select id="lightingMode">
