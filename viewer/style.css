@@ -65,6 +65,18 @@ body,
   text-overflow: ellipsis;
 }
 
+.viewport-label .brdf-toggle {
+  padding: 0 8px;
+  font-size: 12px;
+  opacity: 0.55;
+}
+
+.viewport-label .brdf-toggle.active {
+  opacity: 1;
+  color: #15130d;
+  background: #e8c35a;
+}
+
 .viewport-label button {
   margin: 0;
   padding: 0 7px;

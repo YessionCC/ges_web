@@ -120,7 +120,8 @@ const previewRight = new THREE.Vector3();
 const previewUp = new THREE.Vector3();
 const previewForward = new THREE.Vector3();
 
-// Loaded products, one per viewport in compare mode: { root, materials, name, baseMatrix }.
+// Loaded products, one per viewport in compare mode: { root, materials, name, baseMatrix, brdf }.
+// brdf = { beckmann, f0 }: per-model experimental BRDF switches (compare viewports can differ).
 let products = [];
 let productMaterials = [];
 let compareMode = false;
@@ -579,6 +580,23 @@ function disposeProduct(product) {
   product.materials.forEach((productMaterial) => productMaterial.dispose());
 }
 
+function applyProductBrdf(product) {
+  product.materials.forEach((productMaterial) => {
+    productMaterial.uniforms.specDist.value = product.brdf.beckmann ? 1 : 0;
+    productMaterial.uniforms.fresnelMode.value = product.brdf.f0 ? 1 : 0;
+  });
+}
+
+// Panel checkboxes set every loaded model; compare-viewport toggles then override per model.
+function setAllProductsBrdf(key, value) {
+  products.forEach((product) => {
+    product.brdf[key] = value;
+    applyProductBrdf(product);
+  });
+  overlayLayoutKey = "";
+  updateViewportOverlay();
+}
+
 function setProducts(nextProducts) {
   products = nextProducts;
   productMaterials = products.flatMap((product) => product.materials);
@@ -663,7 +681,7 @@ function updateViewportOverlay() {
     return;
   }
   const viewports = compareMode ? getViewportLayout() : [];
-  const key = JSON.stringify([viewports, products.map((product) => product.name)]);
+  const key = JSON.stringify([viewports, products.map((product) => [product.name, product.brdf])]);
   if (key === overlayLayoutKey) {
     return;
   }
@@ -683,12 +701,30 @@ function updateViewportOverlay() {
       const name = document.createElement("span");
       name.textContent = `${index + 1}. ${product.name}`;
       name.title = product.name;
+      const toggles = [["beckmann", "Beck", "Beckmann distribution (exp.)"], ["f0", "F0", "ps as F0 (exp.)"]].map(
+        ([key, text, title]) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "brdf-toggle";
+          button.textContent = text;
+          button.title = `${title} for this model`;
+          button.classList.toggle("active", Boolean(product.brdf[key]));
+          button.setAttribute("aria-pressed", String(Boolean(product.brdf[key])));
+          button.addEventListener("click", () => {
+            product.brdf[key] = !product.brdf[key];
+            applyProductBrdf(product);
+            overlayLayoutKey = "";
+            updateViewportOverlay();
+          });
+          return button;
+        }
+      );
       const close = document.createElement("button");
       close.type = "button";
       close.textContent = "×";
       close.title = "Remove from comparison";
       close.addEventListener("click", () => removeProduct(index));
-      label.append(name, close);
+      label.append(name, ...toggles, close);
       frame.appendChild(label);
     }
     viewportOverlay.appendChild(frame);
@@ -1465,7 +1501,17 @@ async function loadGlb(buffer, fileName) {
 
   originalMaterials.forEach((sourceMaterial) => sourceMaterial?.dispose?.());
   gltf.scene.updateMatrix();
-  const product = { root: gltf.scene, materials: Array.from(materialCache.values()), name: fileName, baseMatrix: gltf.scene.matrix.clone() };
+  // BRDF switches start from the panel checkboxes; a GLB that records a Beckmann fit turns Beckmann on.
+  const fittedDist = productMetadataList.find((metadata) => metadata?.brdf?.specular_distribution)?.brdf?.specular_distribution;
+  const brdf = { beckmann: fittedDist ? fittedDist === "beckmann" : beckmannDistInput.checked, f0: fresnelPsF0Input.checked };
+  const product = {
+    root: gltf.scene,
+    materials: Array.from(materialCache.values()),
+    name: fileName,
+    baseMatrix: gltf.scene.matrix.clone(),
+    brdf,
+  };
+  applyProductBrdf(product);
   if (isCompareFull()) {
     disposeProduct(product);
     throw new Error(`Compare mode shows at most ${MAX_COMPARE_MODELS} models; remove one first.`);
@@ -1480,6 +1526,9 @@ async function loadGlb(buffer, fileName) {
     clearProductScene();
     setProducts([product]);
     frameProductScene(product.root);
+    // Single model: the panel checkboxes mirror its BRDF state (it may have switched Beckmann on from metadata).
+    beckmannDistInput.checked = product.brdf.beckmann;
+    fresnelPsF0Input.checked = product.brdf.f0;
   }
   updateEnvironmentUniforms();
   updateEnvironmentRotationUniform();
@@ -1551,17 +1600,9 @@ modeSelect.addEventListener("change", () => {
   });
 });
 
-beckmannDistInput.addEventListener("change", () => {
-  forEachProductMaterial((productMaterial) => {
-    productMaterial.uniforms.specDist.value = beckmannDistInput.checked ? 1 : 0;
-  });
-});
+beckmannDistInput.addEventListener("change", () => setAllProductsBrdf("beckmann", beckmannDistInput.checked));
 
-fresnelPsF0Input.addEventListener("change", () => {
-  forEachProductMaterial((productMaterial) => {
-    productMaterial.uniforms.fresnelMode.value = fresnelPsF0Input.checked ? 1 : 0;
-  });
-});
+fresnelPsF0Input.addEventListener("change", () => setAllProductsBrdf("f0", fresnelPsF0Input.checked));
 
 flipVInput.addEventListener("change", () => {
   forEachProductMaterial((productMaterial) => {
